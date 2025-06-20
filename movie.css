@@ -1,0 +1,57 @@
+.movie-detail {
+  padding: 40px 0;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 24px;
+  color: #ff5722;
+  text-decoration: none;
+  font-size: 16px;
+}
+.back-link:hover {
+  text-decoration: underline;
+}
+
+.detail-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 30px;
+  align-items: flex-start;
+}
+
+.detail-poster {
+  flex: 0 0 300px;
+  max-width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 0 12px rgba(0,0,0,0.5);
+}
+
+.detail-info {
+  flex: 1 1 auto;
+  color: #eee;
+}
+.detail-info h1 {
+  margin-top: 0;
+  font-size: 32px;
+  color: #ff5722;
+}
+.detail-info p {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.create-room-btn {
+  display: inline-block;
+  margin-top: 20px;
+  padding: 12px 24px;
+  background: #ff5722;
+  color: #fff;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 16px;
+  transition: background 0.3s;
+}
+.create-room-btn:hover {
+  background: #e64a19;
+}

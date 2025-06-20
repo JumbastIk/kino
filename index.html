@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>🎬 Онлайн-кинотеатр</title>
+  <!-- кеш-бастер для CSS -->
+  <link rel="stylesheet" href="style.css?v=1.0.22112221231211111111122211222251222331122112221111231111211521121312133" />
+</head>
+<body>
+
+  <!-- ===== ПОИСК ===== -->
+  <section class="search-section">
+  <div class="container" style="display: flex; align-items: center; justify-content: space-between;">
+    <input type="text" id="searchInput" placeholder="🔎 Поиск фильмов…" style="flex:1;"/>
+    <a href="profile.html" id="profileLink" style="margin-left:16px; display:flex; align-items:center;">
+      <img id="profilePic" src="https://tgram.ru/wiki/stickers/img/Like/Like01.webp" alt="Профиль" style="width:38px;height:38px;border-radius:50%;object-fit:cover;border:2px solid #ff5722;">
+    </a>
+  </div>
+</section>
+
+  <!-- ===== ГЛАВНЫЙ СЛАЙДЕР (ТОП ФИЛЬМЫ) ===== -->
+  <section class="slider-block main-slider">
+    <div class="container">
+      <h2>🔥 Топ фильмы</h2>
+      <div class="slider-wrapper">
+        <button class="slider-btn prev">‹</button>
+        <div id="mainSlider" class="slider" data-movie-ids="interstellar,tenet,comedy1,drama2,action1,fantasy1"></div>
+        <button class="slider-btn next">›</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="separator"></div>
+
+  <!-- ===== СЛАЙДЕР КОМНАТ ===== -->
+  <section class="slider-block rooms-slider">
+    <div class="container">
+      <h2>💬 Онлайн комнаты</h2>
+      <div class="slider-wrapper">
+        <button class="slider-btn prev">‹</button>
+        <!-- здесь будут рендериться комнаты -->
+        <div id="roomsSlider" class="slider"></div>
+        <button class="slider-btn next">›</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="separator"></div>
+
+  <!-- ===== КАТЕГОРИИ ФИЛЬМОВ ===== -->
+  <section class="categories">
+    <div class="container">
+
+      <!-- ДРАМА -->
+      <section class="category" data-category-id="Драма">
+        <h2>Драма</h2>
+        <div class="slider-wrapper">
+          <button class="slider-btn prev">‹</button>
+          <div class="slider"></div>
+          <button class="slider-btn next">›</button>
+        </div>
+      </section>
+
+      <!-- КОМЕДИЯ -->
+      <section class="category" data-category-id="Комедия">
+        <h2>Комедия</h2>
+        <div class="slider-wrapper">
+          <button class="slider-btn prev">‹</button>
+          <div class="slider"></div>
+          <button class="slider-btn next">›</button>
+        </div>
+      </section>
+
+      <!-- БОЕВИК -->
+      <section class="category" data-category-id="Боевик">
+        <h2>Боевик</h2>
+        <div class="slider-wrapper">
+          <button class="slider-btn prev">‹</button>
+          <div class="slider"></div>
+          <button class="slider-btn next">›</button>
+        </div>
+      </section>
+
+      <!-- ФЭНТЕЗИ -->
+      <section class="category" data-category-id="Фэнтези">
+        <h2>Фэнтези</h2>
+        <div class="slider-wrapper">
+          <button class="slider-btn prev">‹</button>
+          <div class="slider"></div>
+          <button class="slider-btn next">›</button>
+        </div>
+      </section>
+
+    </div>
+  </section>
+
+  <!-- данные и логика -->
+  <script src="data.js?v=1.0.332131121211111111311121213322222222222112222211111115511111123142"></script>
+  <script src="script.js?v=1.0.312411211121112111312212223232112222211121222111215131115111213142"></script>
+</body>
+</html>

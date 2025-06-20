@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Комната просмотра</title>
+  <link rel="stylesheet" href="style.css?v=1.0.717122232217222122222221212112122711131117212111771" />
+  <link rel="stylesheet" href="room.css?v=1.0.77712231221222122212222112711221217113211271111271" />
+</head>
+<body>
+  <div class="room-container">
+    <a id="backLink" href="#" class="back-link">← Назад к описанию</a>
+
+    <!-- плеер -->
+    <div class="player-wrapper">
+      <!-- iframe будет вставлен через room.js -->
+    </div>
+
+    <!-- чат -->
+    <div class="chat-overlay" id="chatOverlay">
+      <div class="chat-container" id="chatContainer">
+        <div id="chatMessages" class="chat-messages"></div>
+        <div class="chat-input-wrap">
+          <input id="chatInput" placeholder="Введите сообщение…" />
+          <button id="sendBtn">Отправить</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="data.js?v=1.0.177172121222212132211211211222222221127111312717"></script>
+    <script src="room.js?v=1.0.17722121212217112221123121112222222211112371121717"></script>
+  </div>
+</body>
+</html>
