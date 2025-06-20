@@ -72,38 +72,84 @@ function initSliderControls() {
   });
 }
 
-// ====== ЛОГИКА ОНЛАЙН‐КОМНАТ ЧЕРЕЗ API ======
+// ====== ЛОГИКА ОНЛАЙН-КОМНАТ ЧЕРЕЗ API ======
 
-// URL до твоего API (относительный путь для Render и локалки)
 const API_URL = '/api/rooms';
 
 // Получить список комнат с сервера
 async function loadRooms() {
   const res = await fetch(API_URL);
+  if (!res.ok) throw new Error('Ошибка загрузки комнат');
   return await res.json();
 }
 
-// Создать новую комнату
+// Создать новую комнату и убедиться, что она появилась в списке
 async function createRoom(title) {
   if (!title) return;
-  await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title })
-  });
-  await renderRooms();
+  const btn = document.querySelector('button[onclick^="window.createRoom"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Создание...';
+  }
+  let roomId = null;
+  try {
+    // 1. Создаём комнату и получаем её id
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title })
+    });
+    const data = await res.json();
+    roomId = data.id;
+
+    // 2. Очищаем поле ввода
+    const input = document.getElementById('newRoomTitle');
+    if (input) input.value = '';
+
+    // 3. Ждём, пока комната появится в списке (до 2 секунд, с повторными попытками)
+    let found = false;
+    for (let i = 0; i < 5; i++) {
+      await renderRooms(roomId);
+      const rooms = await loadRooms();
+      if (rooms.some(r => r.id === roomId)) {
+        found = true;
+        break;
+      }
+      await new Promise(r => setTimeout(r, 400));
+    }
+    if (!found) {
+      alert('Комната создана, но не появилась в списке. Попробуйте обновить страницу.');
+    }
+  } catch (e) {
+    alert('Ошибка при создании комнаты: ' + e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Создать комнату';
+    }
+  }
 }
 
-// Рендерит список комнат в слайдере
-async function renderRooms() {
+// Рендерит список комнат в слайдере, выделяя новую комнату (если передан её id)
+async function renderRooms(highlightRoomId = null) {
   const slider = document.getElementById('roomsSlider');
   if (!slider) return;
-  const rooms = await loadRooms();
+  let rooms = [];
+  try {
+    rooms = await loadRooms();
+  } catch (e) {
+    slider.innerHTML = '<div style="color:red;padding:16px;">Ошибка загрузки комнат</div>';
+    return;
+  }
 
   slider.innerHTML = '';
   rooms.forEach(room => {
     const slide = document.createElement('div');
     slide.className = 'slide';
+    if (highlightRoomId && room.id === highlightRoomId) {
+      slide.style.border = '2px solid #ff9800';
+      slide.style.background = '#222';
+    }
     slide.innerHTML = `
       <a href="room.html?roomId=${encodeURIComponent(room.id)}" class="room-link">
         <div class="room-icon">🎥</div>
@@ -111,7 +157,7 @@ async function renderRooms() {
           <div class="room-title">${room.title}</div>
           <div class="room-viewers">${room.viewers || 1} смотрят</div>
         </div>
-        <div class="room-timer">${room.createdAt ? new Date(room.createdAt).toLocaleTimeString() : ''}</div>
+        <div class="room-timer">${room.created_at ? new Date(room.created_at).toLocaleTimeString() : ''}</div>
       </a>
     `;
     slider.appendChild(slide);
