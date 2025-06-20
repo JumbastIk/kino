@@ -5,19 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>🎬 Онлайн-кинотеатр</title>
   <!-- кеш-бастер для CSS -->
-  <link rel="stylesheet" href="style.css?v=1.0.221122212312111113111412222112222251222331122112221111231111211521121312133" />
+  <link rel="stylesheet" href="style.css?v=1.0.22112221231211111311141222542112222251222331122112221111231111211521121312133" />
 </head>
 <body>
 
   <!-- ===== ПОИСК ===== -->
   <section class="search-section">
-  <div class="container" style="display: flex; align-items: center; justify-content: space-between;">
-    <input type="text" id="searchInput" placeholder="🔎 Поиск фильмов…" style="flex:1;"/>
-    <a href="profile.html" id="profileLink" style="margin-left:16px; display:flex; align-items:center;">
-      <img id="profilePic" src="https://tgram.ru/wiki/stickers/img/Like/Like01.webp" alt="Профиль" style="width:38px;height:38px;border-radius:50%;object-fit:cover;border:2px solid #ff5722;">
-    </a>
-  </div>
-</section>
+    <div class="container" style="display: flex; align-items: center; justify-content: space-between;">
+      <input type="text" id="searchInput" placeholder="🔎 Поиск фильмов…" style="flex:1;"/>
+      <a href="profile.html" id="profileLink" style="margin-left:16px; display:flex; align-items:center;">
+        <img id="profilePic" src="https://tgram.ru/wiki/stickers/img/Like/Like01.webp" alt="Профиль" style="width:38px;height:38px;border-radius:50%;object-fit:cover;border:2px solid #ff5722;">
+      </a>
+    </div>
+  </section>
 
   <!-- ===== ГЛАВНЫЙ СЛАЙДЕР (ТОП ФИЛЬМЫ) ===== -->
   <section class="slider-block main-slider">
@@ -37,6 +37,10 @@
   <section class="slider-block rooms-slider">
     <div class="container">
       <h2>💬 Онлайн комнаты</h2>
+      <div style="margin-bottom: 12px;">
+        <input type="text" id="newRoomTitle" placeholder="Название комнаты" style="padding:6px;"/>
+        <button onclick="window.createRoom(document.getElementById('newRoomTitle').value)" style="padding:6px 16px;margin-left:8px;">Создать комнату</button>
+      </div>
       <div class="slider-wrapper">
         <button class="slider-btn prev">‹</button>
         <!-- здесь будут рендериться комнаты -->
@@ -96,7 +100,7 @@
   </section>
 
   <!-- данные и логика -->
-  <script src="data.js?v=1.0.332131121221111111131211212133222222223222112222211111115511111123142"></script>
-  <script src="script.js?v=1.0.312411211122111211131221222322321122322211121222111215131115111213142"></script>
+  <script src="data.js?v=1.0.33213112122111111113121121521332222222232224112222211111115511111123142"></script>
+  <script src="script.js?v=1.0.31241121112211121113122122232232151223222141121222111215131115111213142"></script>
 </body>
 </html>
