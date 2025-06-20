@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
@@ -34,12 +35,10 @@ app.post('/api/rooms', async (req, res) => {
   try {
     const { title } = req.body;
     const id = Math.random().toString(36).substr(2, 9);
-    // created_at не указываем — MySQL сам ставит CURRENT_TIMESTAMP
     await db.query(
       'INSERT INTO rooms (id, title, viewers) VALUES (?, ?, ?)',
       [id, title || 'Без названия', 1]
     );
-    // Получаем только что созданную комнату (чтобы отправить всем)
     const [rows] = await db.query('SELECT * FROM rooms WHERE id = ?', [id]);
     if (rows[0]) {
       io.emit('room_created', rows[0]);
@@ -47,6 +46,16 @@ app.post('/api/rooms', async (req, res) => {
     res.json({ id });
   } catch (e) {
     res.status(500).json({ error: 'DB error', details: e.message });
+  }
+});
+
+// ====== SPA fallback: отдаём index.html для всех не-API и не-статических GET ======
+app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
+  const indexPath = path.join(__dirname, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('index.html not found');
   }
 });
 
