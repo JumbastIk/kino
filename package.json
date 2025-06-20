@@ -1,5 +1,15 @@
 {
+  "name": "telegram-cinema-app",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
-    "mysql2": "^3.14.1"
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "cors": "^2.8.5",
+    "mysql2": "^3.10.0"
   }
 }
