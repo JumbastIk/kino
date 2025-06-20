@@ -3,17 +3,18 @@ const express = require('express');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
+const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+// Раздача статики (HTML, CSS, JS, картинки)
+app.use(express.static(__dirname));
 
 // ====== ПОДКЛЮЧЕНИЕ К MySQL ======
 const db = mysql.createPool({
-  host: 'server292.hosting.reg.ru', // <-- внешний адрес MySQL, не localhost!
+  host: 'server292.hosting.reg.ru', // внешний адрес MySQL
   user: 'u317143_jumbastik',
   password: 'shelby753753/',
   database: 'u317143_jumbastik'
@@ -44,6 +45,9 @@ app.post('/api/rooms', async (req, res) => {
 });
 
 // ====== SOCKET.IO для синхронизации ======
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
 io.on('connection', (socket) => {
   let currentRoom = null;
   let user = null;
