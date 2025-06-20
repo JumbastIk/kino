@@ -38,30 +38,35 @@ document.addEventListener('DOMContentLoaded', () => {
   btnWrap.appendChild(btn);
 
   // 4. Обработчик клика по кнопке
-  btn.addEventListener('click', e => {
+  btn.addEventListener('click', async e => {
     e.preventDefault();
+    btn.disabled = true;
+    btn.textContent = 'Создание...';
 
-    // Генерируем уникальный ID комнаты
-    const roomId = 'room_' + Date.now();
+    try {
+      // Создаём комнату через серверный API
+      const res = await fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: movie.title })
+      });
+      const data = await res.json();
 
-    // Формируем URL для новой комнаты (относительный путь)
-    const roomURL = `room.html?roomId=${encodeURIComponent(roomId)}`;
-
-    // Выводим ссылку под кнопкой
-    linkContainer.innerHTML = `
-      <strong>Комната создана:</strong>
-      <a href="${roomURL}">${roomURL}</a>
-    `;
-
-    // Сохраняем метаданные в localStorage, включая videoUrl
-    const existing = JSON.parse(localStorage.getItem('rooms') || '[]');
-    existing.push({
-      id: roomId,
-      movieId: movieId,
-      title: movie.title,
-      viewers: 1,
-      videoUrl: movie.videoUrl // обязательно сохраняем ссылку на видео!
-    });
-    localStorage.setItem('rooms', JSON.stringify(existing));
+      if (data.id) {
+        // Показываем ссылку на новую комнату
+        const roomURL = `room.html?roomId=${encodeURIComponent(data.id)}`;
+        linkContainer.innerHTML = `
+          <strong>Комната создана:</strong>
+          <a href="${roomURL}">${roomURL}</a>
+        `;
+      } else {
+        linkContainer.innerHTML = `<span style="color:red;">Ошибка создания комнаты</span>`;
+      }
+    } catch (err) {
+      linkContainer.innerHTML = `<span style="color:red;">Ошибка: ${err.message}</span>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Создать комнату';
+    }
   });
 });
