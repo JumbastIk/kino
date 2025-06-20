@@ -24,9 +24,11 @@ const db = mysql.createPool({
 // ====== API для списка комнат ======
 app.get('/api/rooms', async (req, res) => {
   try {
+    console.log('[GET] /api/rooms');
     const [rows] = await db.query('SELECT * FROM rooms ORDER BY created_at DESC');
     res.json(rows);
   } catch (e) {
+    console.error('[ERROR][GET] /api/rooms:', e);
     res.status(500).json({ error: 'DB error', details: e.message });
   }
 });
@@ -35,16 +37,19 @@ app.post('/api/rooms', async (req, res) => {
   try {
     const { title } = req.body;
     const id = Math.random().toString(36).substr(2, 9);
+    console.log('[POST] /api/rooms', { id, title });
     await db.query(
       'INSERT INTO rooms (id, title, viewers) VALUES (?, ?, ?)',
       [id, title || 'Без названия', 1]
     );
     const [rows] = await db.query('SELECT * FROM rooms WHERE id = ?', [id]);
     if (rows[0]) {
+      console.log('[SOCKET] room_created', rows[0]);
       io.emit('room_created', rows[0]);
     }
     res.json({ id });
   } catch (e) {
+    console.error('[ERROR][POST] /api/rooms:', e);
     res.status(500).json({ error: 'DB error', details: e.message });
   }
 });
@@ -67,6 +72,8 @@ io.on('connection', (socket) => {
   let currentRoom = null;
   let user = null;
 
+  console.log('[SOCKET] client connected:', socket.id);
+
   socket.on('join', async ({ roomId, userData }) => {
     currentRoom = roomId;
     user = userData;
@@ -76,7 +83,9 @@ io.on('connection', (socket) => {
       await db.query('UPDATE rooms SET viewers = viewers + 1 WHERE id = ?', [roomId]);
       const [rows] = await db.query('SELECT viewers FROM rooms WHERE id = ?', [roomId]);
       io.to(roomId).emit('users', rows[0]?.viewers || 1);
-    } catch {}
+    } catch (e) {
+      console.error('[ERROR][SOCKET][join]:', e);
+    }
 
     socket.emit('sync', { time: 0, paused: true });
   });
@@ -93,8 +102,11 @@ io.on('connection', (socket) => {
         await db.query('UPDATE rooms SET viewers = GREATEST(viewers - 1, 0) WHERE id = ?', [currentRoom]);
         const [rows] = await db.query('SELECT viewers FROM rooms WHERE id = ?', [currentRoom]);
         io.to(currentRoom).emit('users', rows[0]?.viewers || 0);
-      } catch {}
+      } catch (e) {
+        console.error('[ERROR][SOCKET][disconnect]:', e);
+      }
     }
+    console.log('[SOCKET] client disconnected:', socket.id);
   });
 });
 
