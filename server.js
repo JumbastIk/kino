@@ -13,14 +13,13 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 // ====== ПОДКЛЮЧЕНИЕ К MySQL ======
 const db = mysql.createPool({
-  host: 'localhost', // или ваш хост на хостинге
-  user: 'u317143_jumbastik', // ваш пользователь
-  password: 'shelby753753/',    // ваш пароль
-  database: 'u317143_jumbastik' // ваша база
+  host: 'server292.hosting.reg.ru', // <-- внешний адрес MySQL, не localhost!
+  user: 'u317143_jumbastik',
+  password: 'shelby753753/',
+  database: 'u317143_jumbastik'
 });
 
 // ====== API для списка комнат ======
-// Получить список комнат
 app.get('/api/rooms', async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM rooms ORDER BY created_at DESC');
@@ -30,7 +29,6 @@ app.get('/api/rooms', async (req, res) => {
   }
 });
 
-// Создать комнату
 app.post('/api/rooms', async (req, res) => {
   try {
     const { title } = req.body;
@@ -55,14 +53,12 @@ io.on('connection', (socket) => {
     user = userData;
     socket.join(roomId);
 
-    // Увеличиваем viewers в базе
     try {
       await db.query('UPDATE rooms SET viewers = viewers + 1 WHERE id = ?', [roomId]);
       const [rows] = await db.query('SELECT viewers FROM rooms WHERE id = ?', [roomId]);
       io.to(roomId).emit('users', rows[0]?.viewers || 1);
     } catch {}
 
-    // Можно добавить sync state через отдельную таблицу, если нужно
     socket.emit('sync', { time: 0, paused: true });
   });
 
@@ -83,6 +79,8 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(3000, () => {
-  console.log('Socket.io/Express server started on port 3000');
+// Используем порт из переменной окружения (важно для Render!)
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log('Socket.io/Express server started on port', PORT);
 });
