@@ -72,9 +72,10 @@ function initSliderControls() {
   });
 }
 
-// ====== ЛОГИКА ОНЛАЙН-КОМНАТ ЧЕРЕЗ API ======
+// ====== ЛОГИКА ОНЛАЙН-КОМНАТ ЧЕРЕЗ API и SOCKET.IO ======
 
 const API_URL = '/api/rooms';
+const socket = io(); // Подключение к серверу Socket.io
 
 // Получить список комнат с сервера
 async function loadRooms() {
@@ -83,54 +84,30 @@ async function loadRooms() {
   return await res.json();
 }
 
-// Создать новую комнату и убедиться, что она появилась в списке
-async function createRoom(title) {
-  if (!title) return;
-  const btn = document.querySelector('button[onclick^="window.createRoom"]');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Создание...';
+// Добавить одну комнату в слайдер (в начало)
+function addRoomToSlider(room, highlight = false) {
+  const slider = document.getElementById('roomsSlider');
+  if (!slider) return;
+  const slide = document.createElement('div');
+  slide.className = 'slide';
+  if (highlight) {
+    slide.style.border = '2px solid #ff9800';
+    slide.style.background = '#222';
   }
-  let roomId = null;
-  try {
-    // 1. Создаём комнату и получаем её id
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title })
-    });
-    const data = await res.json();
-    roomId = data.id;
-
-    // 2. Очищаем поле ввода
-    const input = document.getElementById('newRoomTitle');
-    if (input) input.value = '';
-
-    // 3. Ждём, пока комната появится в списке (до 2 секунд, с повторными попытками)
-    let found = false;
-    for (let i = 0; i < 5; i++) {
-      await renderRooms(roomId);
-      const rooms = await loadRooms();
-      if (rooms.some(r => r.id === roomId)) {
-        found = true;
-        break;
-      }
-      await new Promise(r => setTimeout(r, 400));
-    }
-    if (!found) {
-      alert('Комната создана, но не появилась в списке. Попробуйте обновить страницу.');
-    }
-  } catch (e) {
-    alert('Ошибка при создании комнаты: ' + e.message);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Создать комнату';
-    }
-  }
+  slide.innerHTML = `
+    <a href="room.html?roomId=${encodeURIComponent(room.id)}" class="room-link">
+      <div class="room-icon">🎥</div>
+      <div class="room-info">
+        <div class="room-title">${room.title}</div>
+        <div class="room-viewers">${room.viewers || 1} смотрят</div>
+      </div>
+      <div class="room-timer">${room.created_at ? new Date(room.created_at).toLocaleTimeString() : ''}</div>
+    </a>
+  `;
+  slider.insertBefore(slide, slider.firstChild);
 }
 
-// Рендерит список комнат в слайдере, выделяя новую комнату (если передан её id)
+// Рендерит список комнат в слайдере
 async function renderRooms(highlightRoomId = null) {
   const slider = document.getElementById('roomsSlider');
   if (!slider) return;
@@ -144,25 +121,42 @@ async function renderRooms(highlightRoomId = null) {
 
   slider.innerHTML = '';
   rooms.forEach(room => {
-    const slide = document.createElement('div');
-    slide.className = 'slide';
-    if (highlightRoomId && room.id === highlightRoomId) {
-      slide.style.border = '2px solid #ff9800';
-      slide.style.background = '#222';
-    }
-    slide.innerHTML = `
-      <a href="room.html?roomId=${encodeURIComponent(room.id)}" class="room-link">
-        <div class="room-icon">🎥</div>
-        <div class="room-info">
-          <div class="room-title">${room.title}</div>
-          <div class="room-viewers">${room.viewers || 1} смотрят</div>
-        </div>
-        <div class="room-timer">${room.created_at ? new Date(room.created_at).toLocaleTimeString() : ''}</div>
-      </a>
-    `;
-    slider.appendChild(slide);
+    addRoomToSlider(room, highlightRoomId && room.id === highlightRoomId);
   });
 }
+
+// Создать новую комнату
+async function createRoom(title) {
+  if (!title) return;
+  const btn = document.querySelector('button[onclick^="window.createRoom"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Создание...';
+  }
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title })
+    });
+    const data = await res.json();
+    const input = document.getElementById('newRoomTitle');
+    if (input) input.value = '';
+    // Не обновляем список — новая комната появится через Socket.io
+  } catch (e) {
+    alert('Ошибка при создании комнаты: ' + e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Создать комнату';
+    }
+  }
+}
+
+// ====== SOCKET.IO: слушаем появление новых комнат ======
+socket.on('room_created', (room) => {
+  addRoomToSlider(room, true);
+});
 
 // ====== СТАРТ ПО ГРУЗКЕ СТРАНИЦЫ ======
 document.addEventListener('DOMContentLoaded', () => {

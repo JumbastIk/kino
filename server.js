@@ -14,7 +14,7 @@ app.use(express.static(__dirname));
 
 // ====== ПОДКЛЮЧЕНИЕ К MySQL ======
 const db = mysql.createPool({
-  host: 'server292.hosting.reg.ru', // внешний адрес MySQL
+  host: 'server292.hosting.reg.ru',
   user: 'u317143_jumbastik',
   password: 'shelby753753/',
   database: 'u317143_jumbastik'
@@ -34,10 +34,16 @@ app.post('/api/rooms', async (req, res) => {
   try {
     const { title } = req.body;
     const id = Math.random().toString(36).substr(2, 9);
+    // created_at не указываем — MySQL сам ставит CURRENT_TIMESTAMP
     await db.query(
       'INSERT INTO rooms (id, title, viewers) VALUES (?, ?, ?)',
       [id, title || 'Без названия', 1]
     );
+    // Получаем только что созданную комнату (чтобы отправить всем)
+    const [rows] = await db.query('SELECT * FROM rooms WHERE id = ?', [id]);
+    if (rows[0]) {
+      io.emit('room_created', rows[0]);
+    }
     res.json({ id });
   } catch (e) {
     res.status(500).json({ error: 'DB error', details: e.message });
