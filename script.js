@@ -74,8 +74,8 @@ function initSliderControls() {
 
 // ====== ЛОГИКА ОНЛАЙН‐КОМНАТ ЧЕРЕЗ API ======
 
-// URL до твоего API (замени на свой домен, если не localhost)
-const API_URL = 'https://www.dsgsasd.ru/api/rooms';
+// URL до твоего API (относительный путь для Render и локалки)
+const API_URL = '/api/rooms';
 
 // Получить список комнат с сервера
 async function loadRooms() {
@@ -96,9 +96,9 @@ async function createRoom(title) {
 
 // Рендерит список комнат в слайдере
 async function renderRooms() {
-  const rooms = await loadRooms();
   const slider = document.getElementById('roomsSlider');
   if (!slider) return;
+  const rooms = await loadRooms();
 
   slider.innerHTML = '';
   rooms.forEach(room => {
