@@ -44,12 +44,16 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.textContent = 'Создание...';
 
     try {
-      // Создаём комнату через серверный API
+      // Отправляем и название, и ID фильма
       const res = await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: movie.title })
+        body: JSON.stringify({
+          title: movie.title,
+          movieId: movie.id // добавляем movieId
+        })
       });
+
       const data = await res.json();
 
       if (data.id) {

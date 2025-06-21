@@ -1,22 +1,6 @@
 // ===== ПАРАМЕТРЫ =====
-const ROOM_TTL = 5 * 60 * 1000;
-
-function loadRooms() {
-  return JSON.parse(localStorage.getItem('rooms') || '[]');
-}
-function saveRooms(rooms) {
-  localStorage.setItem('rooms', JSON.stringify(rooms));
-}
-function cleanupExpiredRooms() {
-  const now = Date.now();
-  let rooms = loadRooms();
-  rooms = rooms.filter(r =>
-    !r.lastActive || (now - r.lastActive < ROOM_TTL)
-  );
-  saveRooms(rooms);
-}
-
 const messages = [];
+
 function renderMessages() {
   const box = document.getElementById('chatMessages');
   box.innerHTML = '';
@@ -29,43 +13,53 @@ function renderMessages() {
   box.scrollTop = box.scrollHeight;
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   console.log('[room.js] Страница комнаты загружена');
-  cleanupExpiredRooms();
-  const rooms = loadRooms();
 
-  const params  = new URLSearchParams(window.location.search);
-  const roomId  = params.get('roomId');
+  const params = new URLSearchParams(window.location.search);
+  const roomId = params.get('roomId');
   const backLink = document.getElementById('backLink');
   const playerWrapper = document.querySelector('.player-wrapper');
 
   console.log('[room.js] roomId из URL:', roomId);
 
-  const room = rooms.find(r => r.id === roomId);
+  if (!roomId) {
+    document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">ID комнаты не указан.</p>';
+    return;
+  }
+
+  // Загружаем комнату с сервера
+  let room = null;
+  try {
+    const res = await fetch(`/api/rooms`);
+    const rooms = await res.json();
+    room = rooms.find(r => r.id === roomId);
+  } catch (err) {
+    console.error('[room.js] Ошибка загрузки комнат:', err);
+  }
+
   if (!room) {
     console.error('[room.js] Комната не найдена:', roomId);
     document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">Комната не найдена.</p>';
     return;
   }
+
   console.log('[room.js] Найдена комната:', room);
 
-  room.viewers    = (room.viewers || 0) + 1;
-  room.lastActive = Date.now();
-  saveRooms(rooms);
-
-  // ОЧИЩАЕМ videoUrl у комнаты, чтобы не было старых play-ссылок
-  // и всегда используем только movie.videoUrl (embed-ссылку)
-  const movie = movies.find(m => m.id === room.movieId);
+  // Находим фильм по movieId
+  const movie = movies.find(m => m.id === room.movie_id);
   if (!movie) {
-    console.error('[room.js] Фильм не найден:', room.movieId);
+    console.error('[room.js] Фильм не найден:', room.movie_id);
     document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">Фильм не найден.</p>';
     return;
   }
+
   console.log('[room.js] Найден фильм:', movie);
 
-  backLink.href = `movie.html?id=${encodeURIComponent(room.movieId)}`;
+  // Назад к фильму
+  backLink.href = `movie.html?id=${encodeURIComponent(movie.id)}`;
 
-  // Вставляем iframe-плеер Bunny.net (только embed-ссылка!)
+  // Вставляем iframe-плеер Bunny.net (embed)
   playerWrapper.innerHTML = `<iframe
     src="${movie.videoUrl}"
     style="border: none;"
@@ -76,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ></iframe>`;
 
   // Чат
-  const input   = document.getElementById('chatInput');
+  const input = document.getElementById('chatInput');
   const sendBtn = document.getElementById('sendBtn');
 
   sendBtn.addEventListener('click', () => {

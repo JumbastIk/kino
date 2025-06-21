@@ -34,16 +34,18 @@ app.get('/api/rooms', async (req, res) => {
   }
 });
 
+// === Создание комнаты ===
 app.post('/api/rooms', async (req, res) => {
   try {
-    const { title } = req.body;
+    const { title, movieId } = req.body;
     const id = Math.random().toString(36).substr(2, 9);
-    console.log('[POST] /api/rooms', { id, title });
+    console.log('[POST] /api/rooms', { id, title, movieId });
 
     const { error: insertError } = await supabase.from('rooms').insert([
       {
         id,
         title: title || 'Без названия',
+        movie_id: movieId || null,
         viewers: 1,
         created_at: new Date().toISOString()
       }
