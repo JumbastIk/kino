@@ -27,7 +27,7 @@ function appendMessage({ author, text, created_at }) {
   box.scrollTop = box.scrollHeight;
 }
 
-// Рендер списка участников
+// Рендер списка участников (если у вас есть <div id="membersList">)
 function renderMembers(list) {
   const container = document.getElementById('membersList');
   if (!container) return;
@@ -46,8 +46,7 @@ function applyState({ position, is_paused }) {
   if (Math.abs(videoEl.currentTime - position) > 0.5) {
     videoEl.currentTime = position;
   }
-  if (is_paused) videoEl.pause();
-  else videoEl.play();
+  is_paused ? videoEl.pause() : videoEl.play();
 }
 
 // Отправить своё состояние на сервер
@@ -84,8 +83,20 @@ async function loadHistory(roomId) {
   }
 }
 
+// Утилита для получения HLS-URL из embed-ссылки Bunny.net
+async function fetchHlsUrl(embedUrl) {
+  const parts = embedUrl.split('/');
+  const zone    = parts[4];
+  const videoId = parts[5];
+  const cfgUrl  = `https://iframe.mediadelivery.net/configuration/${zone}/${videoId}`;
+  const res     = await fetch(cfgUrl);
+  if (!res.ok) throw new Error('Не удалось загрузить конфигурацию видео');
+  const cfg = await res.json();
+  return cfg.hls || cfg.hls_url;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-  // Telegram WebApp
+  // 0) Инициализация Telegram WebApp (или гость)
   if (window.Telegram?.WebApp) {
     Telegram.WebApp.ready();
     const tg = Telegram.WebApp.initDataUnsafe?.user || {};
@@ -97,11 +108,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentUser = { id: 'guest', name: 'Guest' };
   }
 
-  // Получаем roomId
+  // 1) Получаем roomId из URL
   currentRoomId = new URLSearchParams(location.search).get('roomId');
   if (!currentRoomId) return showError('ID комнаты не указан.');
 
-  // Проверяем, что такая комната есть
+  // 2) Проверяем существование комнаты
   let rooms;
   try {
     rooms = await fetch(`${API_BASE}/api/rooms`).then(r => r.json());
@@ -111,39 +122,54 @@ document.addEventListener('DOMContentLoaded', async () => {
   const room = rooms.find(r => r.id === currentRoomId);
   if (!room) return showError('Комната не найдена.');
 
-  // Находим фильм и показываем кнопку «Назад»
+  // 3) Ищем фильм по room.movie_id и бек «Назад»
   const movie = movies.find(m => m.id === room.movie_id);
   if (!movie) return showError('Фильм не найден.');
   document.getElementById('backLink').href =
     `movie.html?id=${encodeURIComponent(movie.id)}`;
 
-  // Вставляем video-элемент
+  // 4) Получаем прямой HLS URL и монтируем <video>
+  let hlsUrl;
+  try {
+    hlsUrl = await fetchHlsUrl(movie.videoUrl);
+  } catch (e) {
+    return showError('Не удалось получить прямой поток видео.');
+  }
   videoEl = document.createElement('video');
-  videoEl.src = movie.videoUrl;
   videoEl.controls = true;
   videoEl.style.width = '100%';
-  const player = document.querySelector('.player-wrapper');
-  player.innerHTML = '';
-  player.append(videoEl);
+  document.querySelector('.player-wrapper').innerHTML = '';
+  document.querySelector('.player-wrapper').append(videoEl);
 
-  // Подгружаем и отрисовываем историю чата
+  if (Hls.isSupported()) {
+    const hls = new Hls();
+    hls.loadSource(hlsUrl);
+    hls.attachMedia(videoEl);
+  } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+    videoEl.src = hlsUrl;
+  } else {
+    return showError('Ваш браузер не поддерживает HLS-потоки.');
+  }
+
+  // 5) Подгружаем историю чата
   const history = await loadHistory(currentRoomId);
   history.forEach(appendMessage);
 
-  // Подписываемся на Socket.IO
+  // 6) Подписываемся на Socket.IO
   socket.emit('join', { roomId: currentRoomId, userData: currentUser });
-
   socket.on('room_members', renderMembers);
   socket.on('syncState', applyState);
-  socket.on('player_action', applyState);
-  socket.on('new_message', appendMessage);
+  socket.on('play',   ({ position, is_paused }) => applyState({ position, is_paused }));
+  socket.on('pause',  ({ position, is_paused }) => applyState({ position, is_paused }));
+  socket.on('seek',   ({ position, is_paused }) => applyState({ position, is_paused }));
+  socket.on('chat_message', appendMessage);
 
-  // Локальные события плеера
-  videoEl.addEventListener('play', () => sendState(false));
+  // 7) Локальные события плеера
+  videoEl.addEventListener('play',  () => sendState(false));
   videoEl.addEventListener('pause', () => sendState(true));
   videoEl.addEventListener('seeked', () => sendState(videoEl.paused));
 
-  // Отправка чата
+  // 8) Отправка чата
   document.getElementById('sendBtn').addEventListener('click', sendMessage);
   document.getElementById('chatInput').addEventListener('keyup', e => {
     if (e.key === 'Enter') sendMessage();
