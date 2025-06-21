@@ -1,10 +1,12 @@
-// 💬 Сообщения чата
+// 💬 Чат
 const messages = [];
 
-// 📡 Жёстко заданный API-домен — важно для Telegram WebApp
+// 📡 Адрес сервера
 const API_BASE = 'https://kino-fhwp.onrender.com';
 
-// 🧼 Рендер сообщений чата
+// ⚙️ Подключаем Socket.IO
+const socket = io(API_BASE);
+
 function renderMessages() {
   const box = document.getElementById('chatMessages');
   box.innerHTML = '';
@@ -17,77 +19,108 @@ function renderMessages() {
   box.scrollTop = box.scrollHeight;
 }
 
-// 🚀 Запуск при загрузке страницы
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('[room.js] Страница комнаты загружена');
-
   const params = new URLSearchParams(window.location.search);
   const roomId = params.get('roomId');
+  if (!roomId) return alert('Нет roomId');
+
+  // Получаем контейнеры
   const backLink = document.getElementById('backLink');
   const playerWrapper = document.querySelector('.player-wrapper');
 
-  if (!roomId) {
-    document.body.innerHTML = `<p style="color:#f55; text-align:center; margin-top:50px;">ID комнаты не указан.</p>`;
-    return;
+  // Проверяем data.js
+  if (typeof movies === 'undefined') {
+    return document.body.innerHTML = '<p>Фильмы не загружены.</p>';
   }
 
-  // 🔁 Проверка, что movies загружен из data.js
-  if (typeof movies === 'undefined' || !Array.isArray(movies)) {
-    document.body.innerHTML = `<p style="color:#f55; text-align:center; margin-top:50px;">Ошибка: фильмы не загружены.</p>`;
-    console.error('[room.js] movies не определён — data.js не подключен?');
-    return;
-  }
-
-  // 🧲 Получение комнаты с сервера
-  let room = null;
+  // Запрашиваем детали комнаты (чтобы получить movie_id)
+  let room;
   try {
     const res = await fetch(`${API_BASE}/api/rooms`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const rooms = await res.json();
-    room = rooms.find(r => r.id === roomId);
-  } catch (err) {
-    console.error('[room.js] Ошибка при загрузке комнаты:', err);
-    document.body.innerHTML = `<p style="color:#f55; text-align:center; margin-top:50px;">Ошибка загрузки комнаты. Попробуйте позже.</p>`;
-    return;
+    const list = await res.json();
+    room = list.find(r => r.id === roomId);
+  } catch {
+    return document.body.innerHTML = '<p>Не удалось загрузить комнату.</p>';
   }
+  if (!room) return document.body.innerHTML = '<p>Комната не найдена.</p>';
 
-  if (!room) {
-    console.warn('[room.js] Комната не найдена в списке:', roomId);
-    document.body.innerHTML = `<p style="color:#f55; text-align:center; margin-top:50px;">Комната не найдена.</p>`;
-    return;
-  }
-
-  console.log('[room.js] Найдена комната:', room);
-
-  // 🧩 Получаем фильм по movie_id
+  // Находим фильм
   const movie = movies.find(m => m.id === room.movie_id);
-  if (!movie) {
-    console.warn('[room.js] Фильм не найден:', room.movie_id);
-    document.body.innerHTML = `<p style="color:#f55; text-align:center; margin-top:50px;">Фильм не найден.</p>`;
-    return;
-  }
+  if (!movie) return document.body.innerHTML = '<p>Фильм не найден.</p>';
 
-  console.log('[room.js] Найден фильм:', movie);
-
-  // 🔙 Кнопка "назад"
   backLink.href = `movie.html?id=${encodeURIComponent(movie.id)}`;
 
-  // ▶️ Вставляем iframe-плеер
+  // ——————————————————————————————
+  // Создаём HTML5-плеер вместо iframe
   playerWrapper.innerHTML = `
-    <iframe
-      src="${movie.videoUrl}"
-      style="border: none;"
-      allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-      allowfullscreen
-      width="100%"
-      height="500"
-    ></iframe>
+    <video id="videoPlayer" controls playsinline style="width:100%;max-width:800px;">
+      <source src="${movie.videoUrl}" type="video/mp4" />
+      Ваш браузер не поддерживает видео.
+    </video>
   `;
+  const video = document.getElementById('videoPlayer');
 
-  // 💬 Обработка чата
+  // Подключаемся по WebSocket и присоединяемся к комнате
+  socket.emit('join', { roomId });
+  
+  // Получаем начальное состояние плеера
+  socket.on('syncState', state => {
+    if (state.videoId && state.videoId !== movie.id) {
+      // Если в будущем будут несколько видео — можно здесь сменить источник
+    }
+    // Вычисляем текущую позицию, если видео играет
+    let t = state.time;
+    if (state.playing) {
+      const delta = (Date.now() - state.lastUpdate) / 1000;
+      t += delta;
+    }
+    video.currentTime = t;
+    video.playbackRate = state.speed;
+    if (state.playing) video.play();
+    else video.pause();
+  });
+
+  // Обработчики входящих команд от других участников
+  socket.on('play', ({ time, speed, timestamp }) => {
+    const delta = (Date.now() - timestamp) / 1000;
+    video.currentTime = time + delta;
+    video.playbackRate = speed || 1;
+    video.play();
+  });
+  socket.on('pause', ({ time }) => {
+    video.currentTime = time;
+    video.pause();
+  });
+  socket.on('seek', ({ time }) => {
+    video.currentTime = time;
+  });
+  socket.on('changeVideo', state => {
+    // Единый обработчик смены видео, если будет несколько
+    video.src = movies.find(m => m.id === state.videoId).videoUrl;
+    video.load();
+    video.currentTime = state.time;
+    if (state.playing) video.play();
+  });
+
+  // ——————————————————————————————
+  // Отправляем свои действия
+  video.addEventListener('play', () => {
+    socket.emit('play', { time: video.currentTime, speed: video.playbackRate });
+  });
+  video.addEventListener('pause', () => {
+    socket.emit('pause', { time: video.currentTime });
+  });
+  video.addEventListener('seeked', () => {
+    socket.emit('seek', { time: video.currentTime });
+  });
+  video.addEventListener('ratechange', () => {
+    socket.emit('play', { time: video.currentTime, speed: video.playbackRate });
+  });
+
+  // ——————————————————————————————
+  // Чат (как было)
   const input = document.getElementById('chatInput');
   const sendBtn = document.getElementById('sendBtn');
-
   sendBtn.addEventListener('click', () => {
     const text = input.value.trim();
     if (!text) return;
@@ -95,8 +128,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderMessages();
     input.value = '';
   });
-
-  input.addEventListener('keyup', e => {
-    if (e.key === 'Enter') sendBtn.click();
-  });
+  input.addEventListener('keyup', e => { if (e.key==='Enter') sendBtn.click(); });
 });
