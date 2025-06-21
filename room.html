@@ -4,19 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.0.7171221223222222127322221132222222222312124112122711131117212111771" />
-  <link rel="stylesheet" href="room.css?v=1.0.77712221312222221222212122232212232221142711221217113211271111271" />
+
+  <!-- ✅ Стили с версионированием -->
+  <link rel="stylesheet" href="style.css?v=1.0.7171221223221232222127322221132222222222312124112122711131117212111771" />
+  <link rel="stylesheet" href="room.css?v=1.0.777122213122231232221222212122232212232221142711221217113211271111271" />
 </head>
 <body>
+
   <div class="room-container">
     <a id="backLink" href="#" class="back-link">← Назад к описанию</a>
 
-    <!-- плеер -->
+    <!-- 🎬 Плеер -->
     <div class="player-wrapper">
-      <!-- iframe будет вставлен через room.js -->
+      <!-- iframe вставится через room.js -->
     </div>
 
-    <!-- чат -->
+    <!-- 💬 Чат -->
     <div class="chat-overlay" id="chatOverlay">
       <div class="chat-container" id="chatContainer">
         <div id="chatMessages" class="chat-messages"></div>
@@ -26,10 +29,11 @@
         </div>
       </div>
     </div>
-
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="data.js?v=1.0.17711721221222222232212242132212112311321122222222221127111312717"></script>
-    <script src="room.js?v=1.0.1772211222212221322221713212232212411231211122222222211112371121717"></script>
   </div>
+
+  <!-- ✅ Скрипты с версионированием — внизу для надёжной загрузки -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="data.js?v=1.0.1771172212212222222322122421322121123123111321122222222221127111312717"></script>
+  <script src="room.js?v=1.0.177222112222122213222217132231212232212411231211122222222211112371121717"></script>
 </body>
 </html>
