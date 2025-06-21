@@ -2,31 +2,32 @@ const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const mysql = require('mysql2/promise');
 const path = require('path');
 const fs = require('fs');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Раздача статики (HTML, CSS, JS, картинки)
 app.use(express.static(__dirname));
 
-// ====== ПОДКЛЮЧЕНИЕ К MySQL ======
-const db = mysql.createPool({
-  host: 'server292.hosting.reg.ru',
-  user: 'u317143_jumbastik',
-  password: 'shelby753753/',
-  database: 'u317143_jumbastik'
-});
+// === Подключение к Supabase ===
+const supabase = createClient(
+  'https://cmworinijkexswnjdhao.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNtd29yaW5pamtleHN3bmpkaGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1MDU0OTcsImV4cCI6MjA2NjA4MTQ5N30.qd3ns6_nQIhbAGWdXIE16h26AR9Td14OusfCr5x8G1I'
+);
 
-// ====== API для списка комнат ======
+// === API для списка комнат ===
 app.get('/api/rooms', async (req, res) => {
   try {
     console.log('[GET] /api/rooms');
-    const [rows] = await db.query('SELECT * FROM rooms ORDER BY created_at DESC');
-    res.json(rows);
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
   } catch (e) {
     console.error('[ERROR][GET] /api/rooms:', e);
     res.status(500).json({ error: 'DB error', details: e.message });
@@ -38,15 +39,29 @@ app.post('/api/rooms', async (req, res) => {
     const { title } = req.body;
     const id = Math.random().toString(36).substr(2, 9);
     console.log('[POST] /api/rooms', { id, title });
-    await db.query(
-      'INSERT INTO rooms (id, title, viewers) VALUES (?, ?, ?)',
-      [id, title || 'Без названия', 1]
-    );
-    const [rows] = await db.query('SELECT * FROM rooms WHERE id = ?', [id]);
-    if (rows[0]) {
-      console.log('[SOCKET] room_created', rows[0]);
-      io.emit('room_created', rows[0]);
+
+    const { error: insertError } = await supabase.from('rooms').insert([
+      {
+        id,
+        title: title || 'Без названия',
+        viewers: 1,
+        created_at: new Date().toISOString()
+      }
+    ]);
+
+    if (insertError) throw insertError;
+
+    const { data: newRoom } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (newRoom) {
+      console.log('[SOCKET] room_created', newRoom);
+      io.emit('room_created', newRoom);
     }
+
     res.json({ id });
   } catch (e) {
     console.error('[ERROR][POST] /api/rooms:', e);
@@ -54,7 +69,7 @@ app.post('/api/rooms', async (req, res) => {
   }
 });
 
-// ====== SPA fallback: отдаём index.html для всех не-API и не-статических GET ======
+// === SPA fallback для index.html ===
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const indexPath = path.join(__dirname, 'index.html');
   if (fs.existsSync(indexPath)) {
@@ -64,7 +79,7 @@ app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   }
 });
 
-// ====== SOCKET.IO для синхронизации ======
+// === SOCKET.IO для синхронизации ===
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
@@ -80,9 +95,16 @@ io.on('connection', (socket) => {
     socket.join(roomId);
 
     try {
-      await db.query('UPDATE rooms SET viewers = viewers + 1 WHERE id = ?', [roomId]);
-      const [rows] = await db.query('SELECT viewers FROM rooms WHERE id = ?', [roomId]);
-      io.to(roomId).emit('users', rows[0]?.viewers || 1);
+      const { error: updateError } = await supabase.rpc('increment_viewers', { room_id: roomId });
+      if (updateError) throw updateError;
+
+      const { data: roomData } = await supabase
+        .from('rooms')
+        .select('viewers')
+        .eq('id', roomId)
+        .single();
+
+      io.to(roomId).emit('users', roomData?.viewers || 1);
     } catch (e) {
       console.error('[ERROR][SOCKET][join]:', e);
     }
@@ -99,9 +121,16 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async () => {
     if (currentRoom) {
       try {
-        await db.query('UPDATE rooms SET viewers = GREATEST(viewers - 1, 0) WHERE id = ?', [currentRoom]);
-        const [rows] = await db.query('SELECT viewers FROM rooms WHERE id = ?', [currentRoom]);
-        io.to(currentRoom).emit('users', rows[0]?.viewers || 0);
+        const { error: decError } = await supabase.rpc('decrement_viewers', { room_id: currentRoom });
+        if (decError) throw decError;
+
+        const { data: roomData } = await supabase
+          .from('rooms')
+          .select('viewers')
+          .eq('id', currentRoom)
+          .single();
+
+        io.to(currentRoom).emit('users', roomData?.viewers || 0);
       } catch (e) {
         console.error('[ERROR][SOCKET][disconnect]:', e);
       }
@@ -110,7 +139,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Используем порт из переменной окружения (важно для Render!)
+// Запуск сервера
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log('Socket.io/Express server started on port', PORT);
