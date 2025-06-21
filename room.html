@@ -4,24 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-
-  <!-- ✅ Стили с версионированием -->
-  <link rel="stylesheet" href="style.css?v=1.0.717122212223222221232222127322221132222222222312124112122711131117212111771" />
-  <link rel="stylesheet" href="room.css?v=1.0.77712222132212222231232221222212122232212232221142711221217113211271111271" />
+  <link rel="stylesheet" href="style.css?v=1.0.7171222122222223222221232222127322221132222222222312124112122711131117212111771" />
+  <link rel="stylesheet" href="room.css?v=1.0.77712222222222132212222231232221222212122232212232221142711221217113211271111271" />
 </head>
 <body>
-
   <div class="room-container">
     <a id="backLink" href="#" class="back-link">← Назад к описанию</a>
-
-    <!-- 🎬 Нативный плеер -->
-    <div class="player-wrapper">
-      <!-- сюда будет подключаться <video> через room.js -->
-    </div>
-
-    <!-- 💬 Чат -->
-    <div class="chat-overlay" id="chatOverlay">
-      <div class="chat-container" id="chatContainer">
+    <div class="player-wrapper"></div>
+    <div class="chat-overlay">
+      <div class="chat-container">
         <div id="chatMessages" class="chat-messages"></div>
         <div class="chat-input-wrap">
           <input id="chatInput" placeholder="Введите сообщение…" />
@@ -31,14 +22,13 @@
     </div>
   </div>
 
-  <!-- ✅ Скрипты с версионированием — внизу для надёжной загрузки -->
-  <!-- HLS.js для работы с .m3u8 -->
+  <!-- HLS.js -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <!-- Данные о фильмах -->
-  <script src="data.js?v=1.0.177117221222212222222223221224213221211223123111321122222222221127111312717"></script>
-  <!-- Основной скрипт комнаты -->
-  <script src="room.js?v=1.0.1772222122222122222132222171322312122322212411231211122222222211112371121717"></script>
+  <!-- Data.js -->
+  <script src="data.js?v=1.0.1771172212222122222222222322122422213221211223123111321122222222221127111312717"></script>
+  <!-- Room.js -->
+  <script src="room.js?v=1.0.17722221222221222221322222217132222312122322212411231211122222222211112371121717"></script>
 </body>
 </html>
