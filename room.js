@@ -1,5 +1,8 @@
-// ===== ПАРАМЕТРЫ =====
 const messages = [];
+
+const API_BASE = window.location.origin.includes('localhost')
+  ? 'http://localhost:3000'
+  : 'https://kino-fhwp.onrender.com';
 
 function renderMessages() {
   const box = document.getElementById('chatMessages');
@@ -26,10 +29,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // Загружаем комнату с сервера
+  // 🔧 используем абсолютный путь
   let room = null;
   try {
-    const res = await fetch('/api/rooms');
+    const res = await fetch(`${API_BASE}/api/rooms`);
     const rooms = await res.json();
     room = rooms.find(r => r.id === roomId);
   } catch (err) {
@@ -46,7 +49,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   console.log('[room.js] Найдена комната:', room);
 
-  // Ищем фильм в data.js
   const movie = movies.find(m => m.id === room.movie_id);
   if (!movie) {
     console.error('[room.js] Фильм не найден:', room.movie_id);
@@ -56,10 +58,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   console.log('[room.js] Найден фильм:', movie);
 
-  // Ссылка «назад»
   backLink.href = `movie.html?id=${encodeURIComponent(movie.id)}`;
 
-  // Вставка iframe-плеера
   playerWrapper.innerHTML = `
     <iframe
       src="${movie.videoUrl}"
@@ -71,7 +71,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     ></iframe>
   `;
 
-  // Чат
   const input = document.getElementById('chatInput');
   const sendBtn = document.getElementById('sendBtn');
 
