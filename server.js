@@ -1,6 +1,5 @@
 // server.js
-require('dotenv').config()
-
+require('dotenv').config()       // если используете .env для ключей
 const http    = require('http')
 const express = require('express')
 const { Server } = require('socket.io')
@@ -8,7 +7,7 @@ const cors    = require('cors')
 const path    = require('path')
 const fs      = require('fs')
 
-// Используем ваш модуль с уже настроенным клиентом Supabase
+// ваш модуль supabase.js, где создаётся и экспортируется клиент
 const supabase = require('./supabase')
 
 const app = express()
@@ -16,177 +15,154 @@ app.use(cors())
 app.use(express.json())
 app.use(express.static(__dirname))
 
-// === REST API: получить список комнат ===
+// — API для комнат (осталось без изменений) —
+// GET  /api/rooms
 app.get('/api/rooms', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('rooms')
       .select('*')
       .order('created_at', { ascending: false })
-
     if (error) throw error
     res.json(data)
   } catch (err) {
-    console.error('[GET /api/rooms] Error:', err)
-    res.status(500).json({ error: 'DB error', details: err.message })
+    res.status(500).json({ error: err.message })
   }
 })
-
-// === REST API: создать новую комнату ===
+// POST /api/rooms
 app.post('/api/rooms', async (req, res) => {
   try {
     const { title, movieId } = req.body
     const id = Math.random().toString(36).substr(2, 9)
-
     const { error: insertError } = await supabase
       .from('rooms')
-      .insert([{
-        id,
-        title: title || 'Без названия',
-        movie_id: movieId || null,
-        viewers: 1,
-        created_at: new Date().toISOString()
-      }])
-
+      .insert([{ id, title: title||'Без названия', movie_id: movieId, viewers: 1 }])
     if (insertError) throw insertError
-
-    const { data: newRoom, error: selectError } = await supabase
+    const { data: newRoom, error: selErr } = await supabase
       .from('rooms')
       .select('*')
       .eq('id', id)
       .single()
-
-    if (selectError) throw selectError
-
-    // Оповещаем всех через Socket.io о новой комнате
+    if (selErr) throw selErr
     io.emit('room_created', newRoom)
-
     res.json({ id })
   } catch (err) {
-    console.error('[POST /api/rooms] Error:', err)
-    res.status(500).json({ error: 'DB error', details: err.message })
+    res.status(500).json({ error: err.message })
   }
 })
 
-// === SPA‐fallback для всех прочих GET-запросов ===
+// — API для чата —
+// GET  /api/messages/:roomId
+app.get('/api/messages/:roomId', async (req, res) => {
+  try {
+    const roomId = req.params.roomId
+    const { data, error } = await supabase
+      .from('messages')
+      .select('author, text, created_at')
+      .eq('room_id', roomId)
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+// POST /api/messages
+app.post('/api/messages', async (req, res) => {
+  try {
+    const { room_id, author, text } = req.body
+    const { error } = await supabase
+      .from('messages')
+      .insert([{ room_id, author, text }])
+    if (error) throw error
+    res.json({ status: 'ok' })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// — SPA-fallback —
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const index = path.join(__dirname, 'index.html')
   if (fs.existsSync(index)) return res.sendFile(index)
   res.status(404).send('index.html not found')
 })
 
-// === HTTP + Socket.io сервер ===
 const server = http.createServer(app)
 const io     = new Server(server, { cors: { origin: '*' } })
 
-// Словарь для состояния плеера в каждой комнате
-const roomsState = {
-  // roomId: { videoId, time, playing, speed, lastUpdate }
-}
+// Храним состояние плеера в памяти:
+const roomsState = {}  // { [roomId]: { time, playing, speed, ... } }
 
 io.on('connection', socket => {
   let currentRoom = null
+  let userId      = null
 
   socket.on('join', async ({ roomId, userData }) => {
     currentRoom = roomId
+    userId      = userData.id
     socket.join(roomId)
 
-    // Инкремент viewers через Supabase RPC
-    try {
-      const { error: incErr } = await supabase.rpc('increment_viewers', { room_id: roomId })
-      if (incErr) throw incErr
+    // добавляем в room_members
+    await supabase
+      .from('room_members')
+      .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] })
 
-      const { data: roomData, error: selErr } = await supabase
-        .from('rooms')
-        .select('viewers')
-        .eq('id', roomId)
-        .single()
-      if (selErr) throw selErr
+    // шлём всем в комнате список участников
+    const { data: members } = await supabase
+      .from('room_members')
+      .select('user_id')
+      .eq('room_id', roomId)
+    io.to(roomId).emit('members', members.map(m=>m.user_id))
 
-      io.to(roomId).emit('users', roomData.viewers)
-    } catch (err) {
-      console.error('[Socket join] viewers increment error:', err)
-    }
+    // отправляем новичку историю чата
+    socket.emit(
+      'history', 
+      (await supabase
+        .from('messages')
+        .select('author,text,created_at')
+        .eq('room_id', roomId)
+        .order('created_at',{ascending:true})
+      ).data
+    )
 
-    // Отправляем новому участнику текущее состояние плеера
-    const state = roomsState[roomId] || {
-      videoId: null,
-      time: 0,
-      playing: false,
-      speed: 1,
-      lastUpdate: Date.now()
-    }
-    socket.emit('syncState', state)
+    // отправляем новичку текущее состояние плеера
+    const state = roomsState[roomId] || { time:0,playing:false,speed:1 }
+    socket.emit('sync_state', state)
   })
 
-  socket.on('play', ({ time, speed }) => {
-    if (!currentRoom) return
-    roomsState[currentRoom] = {
-      ...roomsState[currentRoom],
-      time,
-      playing: true,
-      speed: speed || 1,
-      lastUpdate: Date.now()
-    }
-    socket.to(currentRoom).emit('play', { time, speed, timestamp: Date.now() })
+  socket.on('chat_message', async msg => {
+    // msg = { roomId, author, text }
+    await supabase.from('messages').insert([{
+      room_id: msg.roomId,
+      author:  msg.author,
+      text:    msg.text
+    }])
+    io.to(msg.roomId).emit('chat_message', { author: msg.author, text: msg.text })
   })
 
-  socket.on('pause', ({ time }) => {
-    if (!currentRoom) return
-    roomsState[currentRoom] = {
-      ...roomsState[currentRoom],
-      time,
-      playing: false,
-      lastUpdate: Date.now()
-    }
-    socket.to(currentRoom).emit('pause', { time, timestamp: Date.now() })
-  })
-
-  socket.on('seek', ({ time }) => {
-    if (!currentRoom) return
-    roomsState[currentRoom] = {
-      ...roomsState[currentRoom],
-      time,
-      lastUpdate: Date.now()
-    }
-    socket.to(currentRoom).emit('seek', { time, timestamp: Date.now() })
-  })
-
-  socket.on('changeVideo', ({ videoId }) => {
-    if (!currentRoom) return
-    roomsState[currentRoom] = {
-      videoId,
-      time: 0,
-      playing: false,
-      speed: 1,
-      lastUpdate: Date.now()
-    }
-    io.to(currentRoom).emit('changeVideo', roomsState[currentRoom])
+  // плеер
+  socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
+    roomsState[roomId] = { time: position, playing: !is_paused, speed, lastUpdate: Date.now() }
+    socket.to(roomId).emit('player_update', { position, is_paused, speed })
   })
 
   socket.on('disconnect', async () => {
-    if (!currentRoom) return
+    if (!currentRoom || !userId) return
+    // удаляем из room_members (или помечаем ушедшим)
+    await supabase
+      .from('room_members')
+      .delete()
+      .match({ room_id: currentRoom, user_id: userId })
 
-    // Декремент viewers через Supabase RPC
-    try {
-      const { error: decErr } = await supabase.rpc('decrement_viewers', { room_id: currentRoom })
-      if (decErr) throw decErr
-
-      const { data: roomData, error: selErr } = await supabase
-        .from('rooms')
-        .select('viewers')
-        .eq('id', currentRoom)
-        .single()
-      if (selErr) throw selErr
-
-      io.to(currentRoom).emit('users', roomData.viewers)
-    } catch (err) {
-      console.error('[Socket disconnect] viewers decrement error:', err)
-    }
-
-    currentRoom = null
+    // обновляем список участников
+    const { data: members } = await supabase
+      .from('room_members')
+      .select('user_id')
+      .eq('room_id', currentRoom)
+    io.to(currentRoom).emit('members', members.map(m=>m.user_id))
   })
 })
 
 const PORT = process.env.PORT || 3000
-server.listen(PORT, () => console.log(`Server started on port ${PORT}`))
+server.listen(PORT, ()=>console.log(`Server started on ${PORT}`))
