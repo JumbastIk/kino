@@ -21,8 +21,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const backLink = document.getElementById('backLink');
   const playerWrapper = document.querySelector('.player-wrapper');
 
-  console.log('[room.js] roomId из URL:', roomId);
-
   if (!roomId) {
     document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">ID комнаты не указан.</p>';
     return;
@@ -36,6 +34,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     room = rooms.find(r => r.id === roomId);
   } catch (err) {
     console.error('[room.js] Ошибка загрузки комнат:', err);
+    document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">Ошибка загрузки комнаты.</p>';
+    return;
   }
 
   if (!room) {
@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   console.log('[room.js] Найдена комната:', room);
 
-  // Находим фильм по movieId
+  // Находим фильм по movie_id
   const movie = movies.find(m => m.id === room.movie_id);
   if (!movie) {
     console.error('[room.js] Фильм не найден:', room.movie_id);
@@ -56,18 +56,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   console.log('[room.js] Найден фильм:', movie);
 
-  // Назад к фильму
+  // Ссылка «назад»
   backLink.href = `movie.html?id=${encodeURIComponent(movie.id)}`;
 
-  // Вставляем iframe-плеер Bunny.net (embed)
-  playerWrapper.innerHTML = `<iframe
-    src="${movie.videoUrl}"
-    style="border: none;"
-    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-    allowfullscreen
-    width="100%"
-    height="500"
-  ></iframe>`;
+  // Вставка iframe-плеера
+  playerWrapper.innerHTML = `
+    <iframe
+      src="${movie.videoUrl}"
+      style="border: none;"
+      allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+      allowfullscreen
+      width="100%"
+      height="500"
+    ></iframe>
+  `;
 
   // Чат
   const input = document.getElementById('chatInput');
