@@ -1,24 +1,22 @@
 // server.js
-const http = require('http')
+require('dotenv').config()
+
+const http    = require('http')
 const express = require('express')
 const { Server } = require('socket.io')
-const cors = require('cors')
-const path = require('path')
-const fs = require('fs')
-const { createClient } = require('@supabase/supabase-js')
+const cors    = require('cors')
+const path    = require('path')
+const fs      = require('fs')
+
+// Используем ваш модуль с уже настроенным клиентом Supabase
+const supabase = require('./supabase')
 
 const app = express()
 app.use(cors())
 app.use(express.json())
 app.use(express.static(__dirname))
 
-// === Подключение к Supabase ===
-const supabase = createClient(
-  'https://cmworinijkexswnjdhao.supabase.co',
-  'YOUR_SUPABASE_ANON_KEY'
-)
-
-// === REST API для списка комнат ===
+// === REST API: получить список комнат ===
 app.get('/api/rooms', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -34,7 +32,7 @@ app.get('/api/rooms', async (req, res) => {
   }
 })
 
-// === REST API для создания комнаты ===
+// === REST API: создать новую комнату ===
 app.post('/api/rooms', async (req, res) => {
   try {
     const { title, movieId } = req.body
@@ -60,7 +58,7 @@ app.post('/api/rooms', async (req, res) => {
 
     if (selectError) throw selectError
 
-    // Оповещаем всех слушателей через Socket.io
+    // Оповещаем всех через Socket.io о новой комнате
     io.emit('room_created', newRoom)
 
     res.json({ id })
@@ -70,7 +68,7 @@ app.post('/api/rooms', async (req, res) => {
   }
 })
 
-// === SPA-fallback ===
+// === SPA‐fallback для всех прочих GET-запросов ===
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const index = path.join(__dirname, 'index.html')
   if (fs.existsSync(index)) return res.sendFile(index)
@@ -79,9 +77,9 @@ app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
 
 // === HTTP + Socket.io сервер ===
 const server = http.createServer(app)
-const io = new Server(server, { cors: { origin: '*' } })
+const io     = new Server(server, { cors: { origin: '*' } })
 
-// Переменная для хранения состояния плеера в каждой комнате
+// Словарь для состояния плеера в каждой комнате
 const roomsState = {
   // roomId: { videoId, time, playing, speed, lastUpdate }
 }
@@ -93,7 +91,7 @@ io.on('connection', socket => {
     currentRoom = roomId
     socket.join(roomId)
 
-    // Увеличиваем viewers в БД
+    // Инкремент viewers через Supabase RPC
     try {
       const { error: incErr } = await supabase.rpc('increment_viewers', { room_id: roomId })
       if (incErr) throw incErr
@@ -110,7 +108,7 @@ io.on('connection', socket => {
       console.error('[Socket join] viewers increment error:', err)
     }
 
-    // При входе сразу шлём текущее состояние плеера
+    // Отправляем новому участнику текущее состояние плеера
     const state = roomsState[roomId] || {
       videoId: null,
       time: 0,
@@ -121,7 +119,6 @@ io.on('connection', socket => {
     socket.emit('syncState', state)
   })
 
-  // Когда кто-то play
   socket.on('play', ({ time, speed }) => {
     if (!currentRoom) return
     roomsState[currentRoom] = {
@@ -134,7 +131,6 @@ io.on('connection', socket => {
     socket.to(currentRoom).emit('play', { time, speed, timestamp: Date.now() })
   })
 
-  // Когда кто-то pause
   socket.on('pause', ({ time }) => {
     if (!currentRoom) return
     roomsState[currentRoom] = {
@@ -146,7 +142,6 @@ io.on('connection', socket => {
     socket.to(currentRoom).emit('pause', { time, timestamp: Date.now() })
   })
 
-  // Когда кто-то seek
   socket.on('seek', ({ time }) => {
     if (!currentRoom) return
     roomsState[currentRoom] = {
@@ -157,7 +152,6 @@ io.on('connection', socket => {
     socket.to(currentRoom).emit('seek', { time, timestamp: Date.now() })
   })
 
-  // Смена видео (если понадобится)
   socket.on('changeVideo', ({ videoId }) => {
     if (!currentRoom) return
     roomsState[currentRoom] = {
@@ -170,11 +164,10 @@ io.on('connection', socket => {
     io.to(currentRoom).emit('changeVideo', roomsState[currentRoom])
   })
 
-  // Отключение клиента
   socket.on('disconnect', async () => {
     if (!currentRoom) return
 
-    // Декремент viewers в БД
+    // Декремент viewers через Supabase RPC
     try {
       const { error: decErr } = await supabase.rpc('decrement_viewers', { room_id: currentRoom })
       if (decErr) throw decErr
@@ -190,6 +183,7 @@ io.on('connection', socket => {
     } catch (err) {
       console.error('[Socket disconnect] viewers decrement error:', err)
     }
+
     currentRoom = null
   })
 })
