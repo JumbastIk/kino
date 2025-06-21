@@ -1,6 +1,15 @@
+// script.js
+
+// ====== ПАРАМЕТРЫ СЕРВЕРА ======
+const API_BASE = window.location.origin.includes('localhost')
+  ? 'http://localhost:3000'
+  : 'https://kino-fhwp.onrender.com';
+
+const API_URL = `${API_BASE}/api/rooms`;
+const socket  = io(API_BASE);
+
 // ====== ФУНКЦИИ ДЛЯ ФИЛЬМОВ И КАТЕГОРИЙ ======
 
-// Создаёт кликабельную карточку фильма (ведёт на movie.html?id=…)
 function createMovieCard(movie) {
   const link = document.createElement('a');
   link.href = `movie.html?id=${encodeURIComponent(movie.id)}`;
@@ -18,7 +27,6 @@ function createMovieCard(movie) {
   return link;
 }
 
-// Рендерит главный слайдер по data-movie-ids
 function renderMainSlider() {
   const main = document.getElementById('mainSlider');
   if (!main) return;
@@ -37,7 +45,6 @@ function renderMainSlider() {
     .forEach(m => main.appendChild(createMovieCard(m)));
 }
 
-// Рендерит карусели по категориям
 function renderCategories() {
   document.querySelectorAll('.category').forEach(sec => {
     const genre = sec.dataset.categoryId;
@@ -54,53 +61,43 @@ function renderCategories() {
   });
 }
 
-// Подключает стрелки ‹ › для всех слайдеров
 function initSliderControls() {
   document.querySelectorAll('.slider-wrapper').forEach(wrap => {
     const slider = wrap.querySelector('.slider');
-    const prevBtn = wrap.querySelector('.slider-btn.prev');
-    const nextBtn = wrap.querySelector('.slider-btn.next');
-    if (!slider || !prevBtn || !nextBtn) return;
+    const prev   = wrap.querySelector('.slider-btn.prev');
+    const next   = wrap.querySelector('.slider-btn.next');
+    if (!slider || !prev || !next) return;
 
     const step = slider.offsetWidth * 0.8;
-    prevBtn.addEventListener('click', () => {
-      slider.scrollBy({ left: -step, behavior: 'smooth' });
-    });
-    nextBtn.addEventListener('click', () => {
-      slider.scrollBy({ left: step, behavior: 'smooth' });
-    });
+    prev.addEventListener('click', () => slider.scrollBy({ left: -step, behavior: 'smooth' }));
+    next.addEventListener('click', () => slider.scrollBy({ left:  step, behavior: 'smooth' }));
   });
 }
 
-// ====== ЛОГИКА ОНЛАЙН-КОМНАТ ЧЕРЕЗ API и SOCKET.IO ======
+// ====== API / SOCKET.IO: СПИСОК И СОЗДАНИЕ КОМНАТ ======
 
-// Адаптивный адрес сервера (чтобы работало и локально, и на проде, и в Telegram WebApp)
-const API_BASE = window.location.origin.includes('localhost')
-  ? 'http://localhost:3000'
-  : 'https://kino-fhwp.onrender.com';
-
-const API_URL = `${API_BASE}/api/rooms`;
-const socket = io(API_BASE); // Socket.io к тому же серверу
-
-// Получить список комнат с сервера
 async function loadRooms() {
   const res = await fetch(API_URL);
-  if (!res.ok) throw new Error('Ошибка загрузки комнат');
+  if (!res.ok) throw new Error(`Ошибка ${res.status} при загрузке комнат`);
   return await res.json();
 }
 
-// Добавить одну комнату в слайдер (в начало)
 function addRoomToSlider(room, highlight = false) {
   const slider = document.getElementById('roomsSlider');
   if (!slider) return;
+
   const slide = document.createElement('div');
   slide.className = 'slide';
   if (highlight) {
-    slide.style.border = '2px solid #ff9800';
+    slide.style.border     = '2px solid #ff9800';
     slide.style.background = '#222';
   }
   slide.innerHTML = `
-    <a href="room.html?roomId=${encodeURIComponent(room.id)}" class="room-link">
+    <a
+      href="${API_BASE}/room.html?roomId=${encodeURIComponent(room.id)}"
+      class="room-link"
+      style="text-decoration:none; color:inherit;"
+    >
       <div class="room-icon">🎥</div>
       <div class="room-info">
         <div class="room-title">${room.title}</div>
@@ -112,32 +109,32 @@ function addRoomToSlider(room, highlight = false) {
   slider.insertBefore(slide, slider.firstChild);
 }
 
-// Рендерит список комнат в слайдере
-async function renderRooms(highlightRoomId = null) {
+async function renderRooms(activeRoomId = null) {
   const slider = document.getElementById('roomsSlider');
   if (!slider) return;
-  let rooms = [];
+
+  let rooms;
   try {
     rooms = await loadRooms();
-  } catch (e) {
-    slider.innerHTML = '<div style="color:red;padding:16px;">Ошибка загрузки комнат</div>';
+  } catch (err) {
+    slider.innerHTML = `<div style="color:red;padding:16px;">${err.message}</div>`;
     return;
   }
 
   slider.innerHTML = '';
-  rooms.forEach(room => {
-    addRoomToSlider(room, highlightRoomId && room.id === highlightRoomId);
-  });
+  rooms.forEach(r => addRoomToSlider(r, activeRoomId === r.id));
 }
 
-// Создать новую комнату
 async function createRoom(title) {
   if (!title) return;
+
   const btn = document.querySelector('button[onclick^="window.createRoom"]');
   if (btn) {
-    btn.disabled = true;
+    btn.disabled   = true;
     btn.textContent = 'Создание...';
   }
+
+  let newRoomId = null;
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
@@ -145,31 +142,37 @@ async function createRoom(title) {
       body: JSON.stringify({ title })
     });
     const data = await res.json();
-    const input = document.getElementById('newRoomTitle');
-    if (input) input.value = '';
-    // Не обновляем список — новая комната появится через Socket.io
-  } catch (e) {
-    alert('Ошибка при создании комнаты: ' + e.message);
+    if (!res.ok || !data.id) {
+      throw new Error(data.details || 'Не удалось создать комнату');
+    }
+    newRoomId = data.id;
+  } catch (err) {
+    alert('Ошибка при создании комнаты: ' + err.message);
   } finally {
     if (btn) {
-      btn.disabled = false;
+      btn.disabled    = false;
       btn.textContent = 'Создать комнату';
     }
   }
+  // подчёркиваем новую комнату в списке:
+  if (newRoomId) renderRooms(newRoomId);
 }
 
-// ====== SOCKET.IO: слушаем появление новых комнат ======
-socket.on('room_created', (room) => {
+// ====== SOCKET.IO: НОВАЯ КОМНАТА ======
+
+socket.on('room_created', room => {
+  // если список ещё отрисован — мгновенно вставляем
   addRoomToSlider(room, true);
 });
 
-// ====== СТАРТ ПО ЗАГРУЗКЕ СТРАНИЦЫ ======
+// ====== СТАРТ СТРАНИЦЫ ======
+
 document.addEventListener('DOMContentLoaded', () => {
   renderMainSlider();
   renderCategories();
   initSliderControls();
   renderRooms();
+  
+  // экспортируем для кнопки в movie.html
+  window.createRoom = createRoom;
 });
-
-// Экспортируем функцию для кнопки создания комнаты
-window.createRoom = createRoom;

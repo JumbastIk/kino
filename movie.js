@@ -1,27 +1,28 @@
+// movie.js
+
+// Адаптивный базовый URL API (чтобы работало и на localhost, и в проде)
+const API_BASE = window.location.origin.includes('localhost')
+  ? 'http://localhost:3000'
+  : 'https://kino-fhwp.onrender.com';
+
 document.addEventListener('DOMContentLoaded', () => {
-  const API_BASE = window.location.origin.includes('localhost')
-    ? 'http://localhost:3000'
-    : 'https://kino-fhwp.onrender.com';
-
-  // 1. Находим фильм по id из URL
-  const params   = new URLSearchParams(window.location.search);
-  const movieId  = params.get('id');
-  const movie    = movies.find(m => m.id === movieId);
-
-  const container     = document.getElementById('detailContainer');
-  const btnWrap       = document.getElementById('roomBtnContainer');
-  const linkContainer = document.getElementById('newRoomLink');
-  const backLink      = document.getElementById('backLink');
-
-  if (!movie) {
-    container.innerHTML = '<p style="color:#f55;">Фильм не найден.</p>';
+  // 1) Получаем ID фильма из URL
+  const params = new URLSearchParams(window.location.search);
+  const movieId = params.get('id');
+  if (!movieId) {
+    document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">ID фильма не указан.</p>';
     return;
   }
 
-  // Ссылка «Назад»
-  backLink.href = 'index.html';
+  // 2) Ищем фильм в data.js
+  const movie = movies.find(m => m.id === movieId);
+  if (!movie) {
+    document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">Фильм не найден.</p>';
+    return;
+  }
 
-  // 2. Рендерим постер и описание
+  // 3) Рендерим постер и описание
+  const container = document.getElementById('detailContainer');
   container.innerHTML = `
     <img
       src="${movie.poster}"
@@ -34,14 +35,20 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
   `;
 
-  // 3. Создаём кнопку «Создать комнату»
+  // 4) Настраиваем ссылку «Назад»
+  const backLink = document.getElementById('backLink');
+  backLink.href = 'index.html';
+
+  // 5) Рисуем кнопку «Создать комнату»
+  const btnWrap = document.getElementById('roomBtnContainer');
+  const linkContainer = document.getElementById('newRoomLink');
   const btn = document.createElement('button');
   btn.id = 'createRoomBtn';
   btn.className = 'create-room-btn';
   btn.textContent = 'Создать комнату';
   btnWrap.appendChild(btn);
 
-  // 4. Обработчик клика по кнопке
+  // 6) Обработчик клика по кнопке
   btn.addEventListener('click', async e => {
     e.preventDefault();
     btn.disabled = true;
@@ -56,19 +63,21 @@ document.addEventListener('DOMContentLoaded', () => {
           movieId: movie.id
         })
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      const data = await res.json();
-
-      if (data.id) {
-        const roomURL = `room.html?roomId=${encodeURIComponent(data.id)}`;
+      const { id } = await res.json();
+      if (id) {
+        // 7) Показываем ссылку на новую комнату
+        const roomURL = `room.html?roomId=${encodeURIComponent(id)}`;
         linkContainer.innerHTML = `
           <strong>Комната создана:</strong>
           <a href="${roomURL}">${roomURL}</a>
         `;
       } else {
-        linkContainer.innerHTML = `<span style="color:red;">Ошибка создания комнаты</span>`;
+        linkContainer.innerHTML = `<span style="color:red;">Не удалось получить ID комнаты</span>`;
       }
     } catch (err) {
+      console.error('Ошибка при создании комнаты:', err);
       linkContainer.innerHTML = `<span style="color:red;">Ошибка: ${err.message}</span>`;
     } finally {
       btn.disabled = false;
