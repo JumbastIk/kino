@@ -74,8 +74,13 @@ function initSliderControls() {
 
 // ====== ЛОГИКА ОНЛАЙН-КОМНАТ ЧЕРЕЗ API и SOCKET.IO ======
 
-const API_URL = '/api/rooms';
-const socket = io(); // Подключение к серверу Socket.io
+// Адаптивный адрес сервера (чтобы работало и локально, и на проде, и в Telegram WebApp)
+const API_BASE = window.location.origin.includes('localhost')
+  ? 'http://localhost:3000'
+  : 'https://kino-fhwp.onrender.com';
+
+const API_URL = `${API_BASE}/api/rooms`;
+const socket = io(API_BASE); // Socket.io к тому же серверу
 
 // Получить список комнат с сервера
 async function loadRooms() {
@@ -158,7 +163,7 @@ socket.on('room_created', (room) => {
   addRoomToSlider(room, true);
 });
 
-// ====== СТАРТ ПО ГРУЗКЕ СТРАНИЦЫ ======
+// ====== СТАРТ ПО ЗАГРУЗКЕ СТРАНИЦЫ ======
 document.addEventListener('DOMContentLoaded', () => {
   renderMainSlider();
   renderCategories();

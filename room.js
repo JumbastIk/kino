@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Загружаем комнату с сервера
   let room = null;
   try {
-    const res = await fetch(`/api/rooms`);
+    const res = await fetch('/api/rooms');
     const rooms = await res.json();
     room = rooms.find(r => r.id === roomId);
   } catch (err) {
@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   console.log('[room.js] Найдена комната:', room);
 
-  // Находим фильм по movie_id
+  // Ищем фильм в data.js
   const movie = movies.find(m => m.id === room.movie_id);
   if (!movie) {
     console.error('[room.js] Фильм не найден:', room.movie_id);

@@ -1,4 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const API_BASE = window.location.origin.includes('localhost')
+    ? 'http://localhost:3000'
+    : 'https://kino-fhwp.onrender.com';
+
   // 1. Находим фильм по id из URL
   const params   = new URLSearchParams(window.location.search);
   const movieId  = params.get('id');
@@ -44,20 +48,18 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.textContent = 'Создание...';
 
     try {
-      // Отправляем и название, и ID фильма
-      const res = await fetch('/api/rooms', {
+      const res = await fetch(`${API_BASE}/api/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: movie.title,
-          movieId: movie.id // добавляем movieId
+          movieId: movie.id
         })
       });
 
       const data = await res.json();
 
       if (data.id) {
-        // Показываем ссылку на новую комнату
         const roomURL = `room.html?roomId=${encodeURIComponent(data.id)}`;
         linkContainer.innerHTML = `
           <strong>Комната создана:</strong>
