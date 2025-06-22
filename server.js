@@ -1,12 +1,11 @@
 // server.js
 require('dotenv').config();
-const http    = require('http');
+const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
-const cors    = require('cors');
-const path    = require('path');
-const fs      = require('fs');
-
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 const supabase = require('./supabase');
 
 const app = express();
@@ -78,25 +77,26 @@ app.post('/api/messages', async (req, res) => {
   }
 });
 
-// — SPA-fallback —
+// — SPA fallback —
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const index = path.join(__dirname, 'index.html');
   if (fs.existsSync(index)) return res.sendFile(index);
   res.status(404).send('index.html not found');
 });
 
+// Сервер и сокеты
 const server = http.createServer(app);
-const io     = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, { cors: { origin: '*' } });
 
-const roomsState = {}; // { [roomId]: { time, playing, speed, ... } }
+const roomsState = {};
 
 io.on('connection', socket => {
   let currentRoom = null;
-  let userId      = null;
+  let userId = null;
 
   socket.on('join', async ({ roomId, userData }) => {
     currentRoom = roomId;
-    userId      = userData.id;
+    userId = userData.id;
     socket.join(roomId);
 
     await supabase
@@ -126,8 +126,8 @@ io.on('connection', socket => {
   socket.on('chat_message', async msg => {
     await supabase.from('messages').insert([{
       room_id: msg.roomId,
-      author:  msg.author,
-      text:    msg.text
+      author: msg.author,
+      text: msg.text
     }]);
     io.to(msg.roomId).emit('chat_message', { author: msg.author, text: msg.text });
   });
@@ -166,5 +166,6 @@ io.on('connection', socket => {
   });
 });
 
+// ✅ Вот это важно для Render:
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server started on ${PORT}`));
