@@ -4,31 +4,36 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.0.71712221222212212222222322222221232222127322221132222222222312124112122711131117212111771" />
-  <link rel="stylesheet" href="room.css?v=1.0.777122222212222222122213221222222231232221222212122232212232221142711221217113211271111271" />
+  <link rel="stylesheet" href="style.css?v=1.0.717122212221241212212222222322222221232222127322221132222222222312124112122711131117212111771" />
+  <link rel="stylesheet" href="room.css?v=1.0.777122221242212222222122213221222222231232221222212122232212232221142711221217113211271111271" />
 </head>
 <body>
   <div class="room-container">
-    <a id="backLink" href="#" class="back-link">← Назад к описанию</a>
-    <div class="player-wrapper"></div>
+    <a id="backLink" href="index.html" class="back-link">← Назад к описанию</a>
+
+    <div class="player-wrapper" id="playerWrapper"></div>
+
     <div class="chat-overlay">
       <div class="chat-container">
-        <div id="chatMessages" class="chat-messages"></div>
+        <div id="messages" class="chat-messages"></div>
         <div class="chat-input-wrap">
-          <input id="chatInput" placeholder="Введите сообщение…" />
+          <input id="msgInput" placeholder="Введите сообщение…" />
           <button id="sendBtn">Отправить</button>
         </div>
+        <div id="membersList" class="chat-members"></div>
       </div>
     </div>
   </div>
 
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <!-- HLS.js -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <!-- Data.js -->
-  <script src="data.js?v=1.0.17711712212222222221222222222222122232221222422213221211223123111321122222222221127111312717"></script>
+  <script src="data.js?v=1.0.17711712212222222221222314134252222222222122232221222422213221211223123111321122222222221127111312717"></script>
   <!-- Room.js -->
-  <script src="room.js?v=1.0.1772221222122222222212222222221132222221227132222312122322212411231211122222222211112371121717"></script>
+  <script src="room.js?v=1.0.1772221222122222222221223214532522222221132222221227132222312122322212411231211122222222211112371121717"></script>
 </body>
 </html>

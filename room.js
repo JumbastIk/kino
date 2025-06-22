@@ -1,184 +1,179 @@
-// server.js
-require('dotenv').config();
-const http = require('http');
-const express = require('express');
-const { Server } = require('socket.io');
-const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
-const supabase = require('./supabase');
+const socket = io();
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-app.use(express.static(__dirname));
+// Получение параметров из URL
+const params = new URLSearchParams(window.location.search);
+const roomId = params.get('roomId');
 
-// Получить все комнаты
-app.get('/api/rooms', async (req, res) => {
+if (!roomId) {
+  alert('Не указан ID комнаты.');
+  location.href = 'index.html';
+}
+
+const tg = window.Telegram.WebApp;
+tg.expand();
+
+// Получение данных пользователя Telegram
+const user = tg.initDataUnsafe.user || {
+  id: Date.now(),
+  first_name: 'Гость'
+};
+
+const API_BASE = window.location.origin.includes('localhost')
+  ? 'http://localhost:3000'
+  : window.location.origin;
+
+const playerWrapper = document.getElementById('playerWrapper');
+const backLink = document.getElementById('backLink');
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+const messagesBox = document.getElementById('messages');
+const membersList = document.getElementById('membersList');
+
+// Подключение к комнате
+socket.emit('join', {
+  roomId,
+  userData: user
+});
+
+// Запрос текущего состояния плеера
+socket.emit('request_state', { roomId });
+
+let player;
+let isSeeking = false;
+
+// Получение информации о комнате
+async function fetchRoom() {
   try {
-    const { data, error } = await supabase
-      .from('rooms')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    const res = await fetch(`${API_BASE}/api/rooms/${roomId}`);
+    const data = await res.json();
+    const movie = movies.find(m => m.id === data.movie_id);
+    if (!movie) throw new Error('Фильм не найден.');
 
-// Получить одну комнату по ID
-app.get('/api/rooms/:id', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('rooms')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    backLink.href = `movie.html?id=${movie.id}`;
 
-// Создать новую комнату
-app.post('/api/rooms', async (req, res) => {
-  try {
-    const { title, movieId } = req.body;
-    const id = Math.random().toString(36).substr(2, 9);
-    const { error: insertError } = await supabase
-      .from('rooms')
-      .insert([{ id, title: title || 'Без названия', movie_id: movieId, viewers: 1 }]);
-    if (insertError) throw insertError;
-    const { data: newRoom, error: selErr } = await supabase
-      .from('rooms')
-      .select('*')
-      .eq('id', id)
-      .single();
-    if (selErr) throw selErr;
-    io.emit('room_created', newRoom);
-    res.json({ id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    playerWrapper.innerHTML = `
+      <video id="videoPlayer" class="video-player" controls></video>
+    `;
 
-// Получить сообщения комнаты
-app.get('/api/messages/:roomId', async (req, res) => {
-  try {
-    const roomId = req.params.roomId;
-    const { data, error } = await supabase
-      .from('messages')
-      .select('author, text, created_at')
-      .eq('room_id', roomId)
-      .order('created_at', { ascending: true });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    const video = document.getElementById('videoPlayer');
 
-// Добавить сообщение
-app.post('/api/messages', async (req, res) => {
-  try {
-    const { room_id, author, text } = req.body;
-    const { error } = await supabase
-      .from('messages')
-      .insert([{ room_id, author, text }]);
-    if (error) throw error;
-    res.json({ status: 'ok' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(movie.src);
+      hls.attachMedia(video);
+    } else {
+      video.src = movie.src;
+    }
 
-// SPA fallback
-app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
-  const index = path.join(__dirname, 'index.html');
-  if (fs.existsSync(index)) return res.sendFile(index);
-  res.status(404).send('index.html not found');
-});
-
-// Сервер + WebSocket
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-
-const roomsState = {};
-
-io.on('connection', socket => {
-  let currentRoom = null;
-  let userId = null;
-
-  socket.on('join', async ({ roomId, userData }) => {
-    currentRoom = roomId;
-    userId = userData.id;
-    socket.join(roomId);
-
-    await supabase
-      .from('room_members')
-      .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id', 'user_id'] });
-
-    const { data: members } = await supabase
-      .from('room_members')
-      .select('user_id')
-      .eq('room_id', roomId);
-    io.to(roomId).emit('members', members.map(m => m.user_id));
-
-    const messages = await supabase
-      .from('messages')
-      .select('author,text,created_at')
-      .eq('room_id', roomId)
-      .order('created_at', { ascending: true });
-
-    socket.emit('history', messages.data);
-
-    const state = roomsState[roomId] || { position: 0, is_paused: true };
-    socket.emit('sync_state', state);
-  });
-
-  socket.on('chat_message', async msg => {
-    await supabase.from('messages').insert([{
-      room_id: msg.roomId,
-      author: msg.author,
-      text: msg.text
-    }]);
-    io.to(msg.roomId).emit('chat_message', {
-      author: msg.author,
-      text: msg.text,
-      created_at: new Date().toISOString()
+    video.addEventListener('play', () => {
+      if (!isSeeking) {
+        socket.emit('player_action', {
+          roomId,
+          position: video.currentTime,
+          is_paused: false
+        });
+      }
     });
-  });
 
-  socket.on('player_action', ({ roomId, position, is_paused }) => {
-    roomsState[roomId] = {
-      position,
-      is_paused,
-      lastUpdate: Date.now()
-    };
-    socket.to(roomId).emit('player_update', { position, is_paused });
-  });
+    video.addEventListener('pause', () => {
+      if (!isSeeking) {
+        socket.emit('player_action', {
+          roomId,
+          position: video.currentTime,
+          is_paused: true
+        });
+      }
+    });
 
-  socket.on('request_state', ({ roomId }) => {
-    const state = roomsState[roomId] || { position: 0, is_paused: true };
-    socket.emit('current_state', state);
-  });
+    video.addEventListener('seeking', () => {
+      isSeeking = true;
+    });
 
-  socket.on('disconnect', async () => {
-    if (!currentRoom || !userId) return;
-    await supabase
-      .from('room_members')
-      .delete()
-      .match({ room_id: currentRoom, user_id: userId });
+    video.addEventListener('seeked', () => {
+      socket.emit('player_action', {
+        roomId,
+        position: video.currentTime,
+        is_paused: video.paused
+      });
+      isSeeking = false;
+    });
 
-    const { data: members } = await supabase
-      .from('room_members')
-      .select('user_id')
-      .eq('room_id', currentRoom);
-    io.to(currentRoom).emit('members', members.map(m => m.user_id));
+    player = video;
+  } catch (err) {
+    console.error('Ошибка загрузки комнаты:', err);
+    playerWrapper.innerHTML = '<p class="error">Ошибка загрузки комнаты</p>';
+  }
+}
+
+fetchRoom();
+
+// Получение истории сообщений
+socket.on('history', data => {
+  messagesBox.innerHTML = '';
+  data.forEach(({ author, text, created_at }) => {
+    appendMessage(author, text, created_at);
   });
+  messagesBox.scrollTop = messagesBox.scrollHeight;
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server started on ${PORT}`));
+// Получение новых сообщений
+socket.on('chat_message', ({ author, text, created_at }) => {
+  appendMessage(author, text, created_at);
+});
+
+// Обновление участников
+socket.on('members', members => {
+  membersList.innerHTML = `
+    <div class="chat-members-label">Участники:</div>
+    <ul>${members.map(id => `<li>${id}</li>`).join('')}</ul>
+  `;
+});
+
+// Синхронизация плеера
+socket.on('sync_state', ({ position, is_paused }) => {
+  if (!player) return;
+  player.currentTime = position;
+  if (is_paused) {
+    player.pause();
+  } else {
+    player.play();
+  }
+});
+
+// Обновление состояния плеера от других
+socket.on('player_update', ({ position, is_paused }) => {
+  if (!player) return;
+  isSeeking = true;
+  player.currentTime = position;
+  if (is_paused) {
+    player.pause();
+  } else {
+    player.play();
+  }
+  setTimeout(() => (isSeeking = false), 500);
+});
+
+// Отправка сообщения
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendMessage();
+});
+
+function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+  socket.emit('chat_message', {
+    roomId,
+    author: user.first_name,
+    text
+  });
+  msgInput.value = '';
+}
+
+function appendMessage(author, text, created_at) {
+  const msg = document.createElement('div');
+  msg.className = 'chat-message';
+  msg.innerHTML = `<strong>${author}:</strong> ${text}`;
+  messagesBox.appendChild(msg);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+}
