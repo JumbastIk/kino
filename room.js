@@ -8,12 +8,19 @@ if (!roomId) {
 }
 
 const tg = window.Telegram?.WebApp;
-if (tg) tg.expand();
+if (!tg) {
+  document.body.innerHTML = '<div style="padding:32px;text-align:center;color:#f55;font-size:18px;">Открой через Telegram</div>';
+  throw new Error('Telegram WebApp не найден');
+}
+tg.ready();
+tg.expand();
 
-const user = tg?.initDataUnsafe?.user || {
-  id: Date.now(),
-  first_name: 'Гость'
-};
+const user = tg.initDataUnsafe?.user;
+if (!user) {
+  document.body.innerHTML = '<div style="padding:32px;text-align:center;color:#f55;font-size:18px;">Ошибка авторизации. Запустите через Telegram</div>';
+  if (Telegram.WebApp.close) Telegram.WebApp.close();
+  throw new Error('Telegram user not found');
+}
 
 const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000'
@@ -43,12 +50,24 @@ async function fetchRoom() {
 
     backLink.href = `movie.html?id=${movie.id}`;
 
-    playerWrapper.innerHTML = `<video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline></video>`;
+    playerWrapper.innerHTML = `
+      <video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline></video>
+      <button id="playBtn" style="margin-top:10px;">▶ Воспроизвести</button>
+    `;
+
     const video = document.getElementById('videoPlayer');
+    const playBtn = document.getElementById('playBtn');
+
+    playBtn.addEventListener('click', () => {
+      video.play().then(() => {
+        playBtn.style.display = 'none';
+      }).catch(err => {
+        console.warn('[HLS] play() заблокирован:', err.message);
+      });
+    });
 
     console.log('[INFO] HLS URL:', movie.videoUrl);
     console.log('[INFO] Источник:', window.location.origin);
-    console.log('[INFO] Протокол:', location.protocol);
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -56,12 +75,9 @@ async function fetchRoom() {
           xhr.withCredentials = false;
           xhr.onload = () => console.log('[HLS] Загружен сегмент:', url);
           xhr.onerror = () => {
-            console.error('[HLS] ❌ Ошибка загрузки сегмента:', url);
+            console.error('[HLS] ❌ Ошибка сегмента:', url);
             alert(
-              'Ошибка загрузки HLS потока.\n\nВозможная причина: сервер блокирует запрос по заголовку Referer или Origin.\n\nURL: ' +
-              movie.videoUrl +
-              '\nИсточник: ' + window.location.origin +
-              '\n\nРешение:\n✔ Проверь настройки Pull Zone в BunnyCDN\n✔ Разреши домен: ' + window.location.origin
+              'Ошибка загрузки видео.\n\nПроверь настройки BunnyCDN.\nРазреши домен: ' + window.location.origin
             );
           };
         }
@@ -102,8 +118,8 @@ async function fetchRoom() {
 
     player = video;
   } catch (err) {
-    console.error('[ERROR] Ошибка загрузки комнаты:', err);
-    playerWrapper.innerHTML = `<p class="error">Ошибка загрузки комнаты: ${err.message}</p>`;
+    console.error('[ERROR] Ошибка комнаты:', err);
+    playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 fetchRoom();
@@ -130,7 +146,7 @@ socket.on('sync_state', ({ position = 0, is_paused }) => {
   is_paused
     ? player.pause()
     : player.play().catch(err => {
-        console.warn('[HLS] Автозапуск видео заблокирован:', err.message);
+        console.warn('[HLS] Автозапуск заблокирован:', err.message);
       });
 });
 
@@ -141,7 +157,7 @@ socket.on('player_update', ({ position = 0, is_paused }) => {
   is_paused
     ? player.pause()
     : player.play().catch(err => {
-        console.warn('[HLS] Автозапуск видео заблокирован:', err.message);
+        console.warn('[HLS] Автозапуск заблокирован:', err.message);
       });
   setTimeout(() => (isSeeking = false), 200);
 });
