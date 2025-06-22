@@ -13,6 +13,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
+// Получить все комнаты
 app.get('/api/rooms', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -26,6 +27,22 @@ app.get('/api/rooms', async (req, res) => {
   }
 });
 
+// Получить одну комнату по ID
+app.get('/api/rooms/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Создать новую комнату
 app.post('/api/rooms', async (req, res) => {
   try {
     const { title, movieId } = req.body;
@@ -47,6 +64,7 @@ app.post('/api/rooms', async (req, res) => {
   }
 });
 
+// Получить сообщения комнаты
 app.get('/api/messages/:roomId', async (req, res) => {
   try {
     const roomId = req.params.roomId;
@@ -62,6 +80,7 @@ app.get('/api/messages/:roomId', async (req, res) => {
   }
 });
 
+// Добавить сообщение
 app.post('/api/messages', async (req, res) => {
   try {
     const { room_id, author, text } = req.body;
@@ -75,16 +94,18 @@ app.post('/api/messages', async (req, res) => {
   }
 });
 
+// SPA fallback
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const index = path.join(__dirname, 'index.html');
   if (fs.existsSync(index)) return res.sendFile(index);
   res.status(404).send('index.html not found');
 });
 
+// Сервер + WebSocket
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-const roomsState = {};  // { [roomId]: { time, playing, speed, lastUpdate } }
+const roomsState = {};
 
 io.on('connection', socket => {
   let currentRoom = null;
@@ -97,7 +118,7 @@ io.on('connection', socket => {
 
     await supabase
       .from('room_members')
-      .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] });
+      .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id', 'user_id'] });
 
     const { data: members } = await supabase
       .from('room_members')
@@ -105,15 +126,13 @@ io.on('connection', socket => {
       .eq('room_id', roomId);
     io.to(roomId).emit('members', members.map(m => m.user_id));
 
-    socket.emit(
-      'history',
-      (await supabase
-        .from('messages')
-        .select('author,text,created_at')
-        .eq('room_id', roomId)
-        .order('created_at', { ascending: true })
-      ).data
-    );
+    const messages = await supabase
+      .from('messages')
+      .select('author,text,created_at')
+      .eq('room_id', roomId)
+      .order('created_at', { ascending: true });
+
+    socket.emit('history', messages.data);
 
     const state = roomsState[roomId] || { position: 0, is_paused: true };
     socket.emit('sync_state', state);
@@ -122,8 +141,8 @@ io.on('connection', socket => {
   socket.on('chat_message', async msg => {
     await supabase.from('messages').insert([{
       room_id: msg.roomId,
-      author:  msg.author,
-      text:    msg.text
+      author: msg.author,
+      text: msg.text
     }]);
     io.to(msg.roomId).emit('chat_message', {
       author: msg.author,

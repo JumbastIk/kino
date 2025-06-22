@@ -1,18 +1,18 @@
-// movie.js
-
 const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   const movieId = params.get('id');
+
   if (!movieId) {
     document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">ID фильма не указан.</p>';
     return;
   }
 
   const movie = movies.find(m => m.id === movieId);
+
   if (!movie) {
     document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">Фильм не найден.</p>';
     return;
@@ -20,11 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const container = document.getElementById('detailContainer');
   container.innerHTML = `
-    <img
-      src="${movie.poster}"
-      alt="${movie.title}"
-      class="detail-poster"
-    />
+    <img src="${movie.poster}" alt="${movie.title}" class="detail-poster" />
     <div class="detail-info">
       <h1>${movie.title}</h1>
       <p>${movie.desc}</p>
@@ -32,10 +28,11 @@ document.addEventListener('DOMContentLoaded', () => {
   `;
 
   const backLink = document.getElementById('backLink');
-  backLink.href = 'index.html';
+  if (backLink) backLink.href = 'index.html';
 
   const btnWrap = document.getElementById('roomBtnContainer');
   const linkContainer = document.getElementById('newRoomLink');
+
   const btn = document.createElement('button');
   btn.id = 'createRoomBtn';
   btn.className = 'create-room-btn';
@@ -56,13 +53,15 @@ document.addEventListener('DOMContentLoaded', () => {
           movieId: movie.id
         })
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      if (!res.ok) throw new Error(`Ошибка HTTP: ${res.status}`);
 
       const { id } = await res.json();
+
       if (id) {
         const roomURL = `room.html?roomId=${encodeURIComponent(id)}`;
         linkContainer.innerHTML = `
-          <strong>Комната создана:</strong>
+          <strong>Комната создана:</strong><br />
           <a href="${roomURL}">${roomURL}</a>
         `;
       } else {
