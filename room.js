@@ -1,147 +1,165 @@
-const API_BASE = window.location.origin.includes('localhost')
-  ? 'http://localhost:3000'
-  : 'https://kino-fhwp.onrender.com';
-const socket = io(API_BASE);
+// server.js
+require('dotenv').config();
+const http = require('http');
+const express = require('express');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const supabase = require('./supabase');
 
-let videoEl, currentRoomId, currentUser;
-let lastSentTime = 0;
-let lastSentTimestamp = 0;
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(express.static(__dirname));
 
-function showError(msg) {
-  document.body.innerHTML = `
-    <p style="color:#f55; text-align:center; margin-top:50px;">
-      ${msg}
-    </p>`;
-}
-
-function appendMessage({ author, text, created_at }) {
-  const box = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = 'chat-message';
-  div.innerHTML = `
-    <span class="author">${author}</span>:
-    <span class="text">${text}</span>
-    <span class="timestamp">${new Date(created_at).toLocaleTimeString()}</span>
-  `;
-  box.append(div);
-  box.scrollTop = box.scrollHeight;
-}
-
-function applyState({ position, is_paused }) {
-  if (!videoEl) return;
-  if (Math.abs(videoEl.currentTime - position) > 0.5) {
-    videoEl.currentTime = position;
+app.get('/api/rooms', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  is_paused ? videoEl.pause() : videoEl.play();
-}
+});
 
-function sendState(is_paused) {
-  const now = videoEl.currentTime;
-  if (Math.abs(now - lastSentTime) > 0.5 || Date.now() - lastSentTimestamp > 3000) {
-    socket.emit('player_action', {
-      roomId: currentRoomId,
-      position: now,
-      is_paused
-    });
-    lastSentTime = now;
-    lastSentTimestamp = Date.now();
+app.post('/api/rooms', async (req, res) => {
+  try {
+    const { title, movieId } = req.body;
+    const id = Math.random().toString(36).substr(2, 9);
+    const { error: insertError } = await supabase
+      .from('rooms')
+      .insert([{ id, title: title || 'Без названия', movie_id: movieId, viewers: 1 }]);
+    if (insertError) throw insertError;
+    const { data: newRoom, error: selErr } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (selErr) throw selErr;
+    io.emit('room_created', newRoom);
+    res.json({ id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-}
+});
 
-function sendMessage() {
-  const input = document.getElementById('chatInput');
-  const text = input.value.trim();
-  if (!text) return;
-  socket.emit('chat_message', {
-    roomId: currentRoomId,
-    author: currentUser.name,
-    text
+app.get('/api/messages/:roomId', async (req, res) => {
+  try {
+    const roomId = req.params.roomId;
+    const { data, error } = await supabase
+      .from('messages')
+      .select('author, text, created_at')
+      .eq('room_id', roomId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/messages', async (req, res) => {
+  try {
+    const { room_id, author, text } = req.body;
+    const { error } = await supabase
+      .from('messages')
+      .insert([{ room_id, author, text }]);
+    if (error) throw error;
+    res.json({ status: 'ok' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
+  const index = path.join(__dirname, 'index.html');
+  if (fs.existsSync(index)) return res.sendFile(index);
+  res.status(404).send('index.html not found');
+});
+
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
+
+const roomsState = {};  // { [roomId]: { time, playing, speed, lastUpdate } }
+
+io.on('connection', socket => {
+  let currentRoom = null;
+  let userId = null;
+
+  socket.on('join', async ({ roomId, userData }) => {
+    currentRoom = roomId;
+    userId = userData.id;
+    socket.join(roomId);
+
+    await supabase
+      .from('room_members')
+      .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] });
+
+    const { data: members } = await supabase
+      .from('room_members')
+      .select('user_id')
+      .eq('room_id', roomId);
+    io.to(roomId).emit('members', members.map(m => m.user_id));
+
+    socket.emit(
+      'history',
+      (await supabase
+        .from('messages')
+        .select('author,text,created_at')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: true })
+      ).data
+    );
+
+    const state = roomsState[roomId] || { position: 0, is_paused: true };
+    socket.emit('sync_state', state);
   });
-  input.value = '';
-}
 
-async function loadHistory(roomId) {
-  try {
-    const res = await fetch(`${API_BASE}/api/messages/${roomId}`);
-    if (!res.ok) throw new Error(res.statusText);
-    return await res.json();
-  } catch (e) {
-    console.warn('Историю чата загрузить не удалось:', e);
-    return [];
-  }
-}
+  socket.on('chat_message', async msg => {
+    await supabase.from('messages').insert([{
+      room_id: msg.roomId,
+      author:  msg.author,
+      text:    msg.text
+    }]);
+    io.to(msg.roomId).emit('chat_message', {
+      author: msg.author,
+      text: msg.text,
+      created_at: new Date().toISOString()
+    });
+  });
 
-function heartbeatSync() {
-  socket.emit('request_state', { roomId: currentRoomId });
-  setTimeout(heartbeatSync, 5000);
-}
-
-document.addEventListener('DOMContentLoaded', async () => {
-  if (window.Telegram?.WebApp) {
-    Telegram.WebApp.ready();
-    const tg = Telegram.WebApp.initDataUnsafe?.user || {};
-    currentUser = {
-      id: tg.id || 'guest',
-      name: tg.first_name || tg.username || 'Guest'
+  socket.on('player_action', ({ roomId, position, is_paused }) => {
+    roomsState[roomId] = {
+      position,
+      is_paused,
+      lastUpdate: Date.now()
     };
-  } else {
-    currentUser = { id: 'guest', name: 'Guest' };
-  }
+    socket.to(roomId).emit('player_update', { position, is_paused });
+  });
 
-  currentRoomId = new URLSearchParams(location.search).get('roomId');
-  if (!currentRoomId) return showError('ID комнаты не указан.');
+  socket.on('request_state', ({ roomId }) => {
+    const state = roomsState[roomId] || { position: 0, is_paused: true };
+    socket.emit('current_state', state);
+  });
 
-  let rooms;
-  try {
-    rooms = await fetch(`${API_BASE}/api/rooms`).then(r => r.json());
-  } catch {
-    return showError('Не удалось получить список комнат.');
-  }
+  socket.on('disconnect', async () => {
+    if (!currentRoom || !userId) return;
+    await supabase
+      .from('room_members')
+      .delete()
+      .match({ room_id: currentRoom, user_id: userId });
 
-  const room = rooms.find(r => r.id === currentRoomId);
-  if (!room) return showError('Комната не существует.');
-
-  const movie = movies.find(m => m.id === room.movie_id);
-  if (!movie) return showError('Фильм не найден.');
-
-  document.getElementById('backLink').href =
-    `movie.html?id=${encodeURIComponent(movie.id)}`;
-
-  const hlsUrl = movie.videoUrl;
-
-  videoEl = document.createElement('video');
-  videoEl.controls = true;
-  videoEl.style.width = '100%';
-  const wrapper = document.querySelector('.player-wrapper');
-  wrapper.innerHTML = '';
-  wrapper.append(videoEl);
-
-  if (Hls.isSupported()) {
-    const hls = new Hls();
-    hls.loadSource(hlsUrl);
-    hls.attachMedia(videoEl);
-  } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-    videoEl.src = hlsUrl;
-  } else {
-    return showError('Ваш браузер не поддерживает HLS-потоки.');
-  }
-
-  (await loadHistory(currentRoomId)).forEach(appendMessage);
-
-  socket.emit('join', { roomId: currentRoomId, userData: currentUser });
-  socket.on('sync_state', applyState);
-  socket.on('player_update', applyState);
-  socket.on('current_state', applyState);
-  socket.on('chat_message', appendMessage);
-
-  heartbeatSync();
-
-  videoEl.addEventListener('play', () => sendState(false));
-  videoEl.addEventListener('pause', () => sendState(true));
-  videoEl.addEventListener('seeked', () => sendState(videoEl.paused));
-
-  document.getElementById('sendBtn').addEventListener('click', sendMessage);
-  document.getElementById('chatInput').addEventListener('keyup', e => {
-    if (e.key === 'Enter') sendMessage();
+    const { data: members } = await supabase
+      .from('room_members')
+      .select('user_id')
+      .eq('room_id', currentRoom);
+    io.to(currentRoom).emit('members', members.map(m => m.user_id));
   });
 });
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server started on ${PORT}`));
