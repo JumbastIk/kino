@@ -1,7 +1,7 @@
 const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
-const socket   = io(API_BASE);
+const socket = io(API_BASE);
 
 let videoEl, currentRoomId, currentUser;
 
@@ -64,23 +64,12 @@ async function loadHistory(roomId) {
   }
 }
 
-async function fetchHlsUrl(embedUrl) {
-  const parts   = embedUrl.split('/');
-  const zone    = parts[4];
-  const videoId = parts[5];
-  const cfgUrl  = `https://iframe.mediadelivery.net/configuration/${zone}/${videoId}`;
-  const res     = await fetch(cfgUrl);
-  if (!res.ok) throw new Error(`Конфиг не найден: ${res.status}`);
-  const cfg     = await res.json();
-  return cfg.hls || cfg.hls_url;
-}
-
 document.addEventListener('DOMContentLoaded', async () => {
   if (window.Telegram?.WebApp) {
     Telegram.WebApp.ready();
     const tg = Telegram.WebApp.initDataUnsafe?.user || {};
     currentUser = {
-      id:   tg.id   || 'guest',
+      id: tg.id || 'guest',
       name: tg.first_name || tg.username || 'Guest'
     };
   } else {
@@ -96,6 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch {
     return showError('Не удалось получить список комнат.');
   }
+
   const room = rooms.find(r => r.id === currentRoomId);
   if (!room) return showError('Комната не существует.');
 
@@ -105,13 +95,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('backLink').href =
     `movie.html?id=${encodeURIComponent(movie.id)}`;
 
-  let hlsUrl;
-  try {
-    hlsUrl = await fetchHlsUrl(movie.videoUrl);
-  } catch (e) {
-    console.error(e);
-    return showError('Не удалось получить прямой поток видео.');
-  }
+  // Используем videoUrl напрямую, так как это .m3u8
+  const hlsUrl = movie.videoUrl;
+
   videoEl = document.createElement('video');
   videoEl.controls = true;
   videoEl.style.width = '100%';
@@ -132,13 +118,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   (await loadHistory(currentRoomId)).forEach(appendMessage);
 
   socket.emit('join', { roomId: currentRoomId, userData: currentUser });
-  socket.on('sync_state', applyState);  // главное изменение — правильное событие от сервера
-  socket.on('player_update', applyState); // ещё одно важное событие
+  socket.on('sync_state', applyState);
+  socket.on('player_update', applyState);
   socket.on('chat_message', appendMessage);
 
-  videoEl.addEventListener('play',  () => sendState(false));
+  videoEl.addEventListener('play', () => sendState(false));
   videoEl.addEventListener('pause', () => sendState(true));
-  videoEl.addEventListener('seeked',() => sendState(videoEl.paused));
+  videoEl.addEventListener('seeked', () => sendState(videoEl.paused));
 
   document.getElementById('sendBtn').addEventListener('click', sendMessage);
   document.getElementById('chatInput').addEventListener('keyup', e => {

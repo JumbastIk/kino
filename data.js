@@ -5,7 +5,7 @@ const movies = [
     desc: 'Фантастика, 2014. Космическое путешествие...',
     poster: 'image/telegram.png',
     category: 'Драма',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'tenet',
@@ -13,7 +13,7 @@ const movies = [
     desc: 'Триллер, 2020. Тайм-менеджмент и спецоперации...',
     poster: 'image/telegram.png',
     category: 'Драма',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'comedy1',
@@ -21,7 +21,7 @@ const movies = [
     desc: 'Легкая комедия для поднятия настроения.',
     poster: 'image/telegram.png',
     category: 'Комедия',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'comedy2',
@@ -29,7 +29,7 @@ const movies = [
     desc: 'Еще одна веселая история.',
     poster: 'image/telegram.png',
     category: 'Комедия',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'action1',
@@ -37,7 +37,7 @@ const movies = [
     desc: 'Динамичный боевик с захватывающим сюжетом.',
     poster: 'image/telegram.png',
     category: 'Боевик',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'action2',
@@ -45,7 +45,7 @@ const movies = [
     desc: 'Вторая часть с новыми героями.',
     poster: 'image/telegram.png',
     category: 'Боевик',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'drama1',
@@ -53,7 +53,7 @@ const movies = [
     desc: 'Глубокая эмоциональная драма.',
     poster: 'image/telegram.png',
     category: 'Драма',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'drama2',
@@ -61,7 +61,7 @@ const movies = [
     desc: 'Новая история о любви и жизни.',
     poster: 'image/telegram.png',
     category: 'Драма',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'comedy3',
@@ -69,7 +69,7 @@ const movies = [
     desc: 'Свежий взгляд на комедийный жанр.',
     poster: 'image/telegram.png',
     category: 'Комедия',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'fantasy1',
@@ -77,7 +77,7 @@ const movies = [
     desc: 'Магический мир и эпические приключения.',
     poster: 'image/telegram.png',
     category: 'Фэнтези',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   },
   {
     id: 'fantasy2',
@@ -85,6 +85,6 @@ const movies = [
     desc: 'Продолжение сказочной саги.',
     poster: 'image/telegram.png',
     category: 'Фэнтези',
-    videoUrl: 'https://iframe.mediadelivery.net/embed/457212/4813b13a-ba29-4da5-a2c5-140ab5305172'
+    videoUrl: 'https://vz-0818f41b-230.b-cdn.net/4813b13a-ba29-4da5-a2c5-140ab5305172/playlist.m3u8'
   }
 ];
