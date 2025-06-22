@@ -127,13 +127,22 @@ function sendMessage() {
 socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
   player.currentTime = position;
-  is_paused ? player.pause() : player.play();
+  is_paused
+    ? player.pause()
+    : player.play().catch(err => {
+        console.warn('[HLS] Автозапуск видео заблокирован:', err.message);
+      });
 });
+
 socket.on('player_update', ({ position = 0, is_paused }) => {
   if (!player) return;
   isSeeking = true;
   player.currentTime = position;
-  is_paused ? player.pause() : player.play();
+  is_paused
+    ? player.pause()
+    : player.play().catch(err => {
+        console.warn('[HLS] Автозапуск видео заблокирован:', err.message);
+      });
   setTimeout(() => (isSeeking = false), 200);
 });
 
