@@ -8,19 +8,15 @@ if (!roomId) {
 }
 
 const tg = window.Telegram?.WebApp;
-if (!tg) {
-  document.body.innerHTML = '<div style="padding:32px;text-align:center;color:#f55;font-size:18px;">Открой через Telegram</div>';
-  throw new Error('Telegram WebApp не найден');
+if (tg) {
+  tg.ready();
+  tg.expand();
 }
-tg.ready();
-tg.expand();
 
-const user = tg.initDataUnsafe?.user;
-if (!user) {
-  document.body.innerHTML = '<div style="padding:32px;text-align:center;color:#f55;font-size:18px;">Ошибка авторизации. Запустите через Telegram</div>';
-  if (Telegram.WebApp.close) Telegram.WebApp.close();
-  throw new Error('Telegram user not found');
-}
+const user = tg?.initDataUnsafe?.user || {
+  id: Date.now(),
+  first_name: 'Гость'
+};
 
 const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000'
@@ -65,9 +61,6 @@ async function fetchRoom() {
         console.warn('[HLS] play() заблокирован:', err.message);
       });
     });
-
-    console.log('[INFO] HLS URL:', movie.videoUrl);
-    console.log('[INFO] Источник:', window.location.origin);
 
     if (Hls.isSupported()) {
       const hls = new Hls({
