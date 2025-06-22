@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 const http = require('http');
 const express = require('express');
@@ -24,6 +23,22 @@ app.get('/api/rooms', async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error('GET /api/rooms error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 🛠️ ДОБАВЛЕНО: получить комнату по ID
+app.get('/api/rooms/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('GET /api/rooms/:id error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -83,7 +98,7 @@ app.post('/api/messages', async (req, res) => {
   }
 });
 
-// — SPA fallback —
+// — SPA fallback — ОБЯЗАТЕЛЬНО В КОНЦЕ
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const index = path.join(__dirname, 'index.html');
   if (fs.existsSync(index)) return res.sendFile(index);
@@ -141,7 +156,11 @@ io.on('connection', socket => {
         author: msg.author,
         text: msg.text
       }]);
-      io.to(msg.roomId).emit('chat_message', { author: msg.author, text: msg.text });
+      io.to(msg.roomId).emit('chat_message', {
+        author: msg.author,
+        text: msg.text,
+        created_at: new Date().toISOString()
+      });
     } catch (err) {
       console.error('chat_message error:', err.message);
     }
@@ -185,6 +204,6 @@ io.on('connection', socket => {
   });
 });
 
-// ✅ Для Render:
+// ✅ Для Render или localhost:
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server started on ${PORT}`));
