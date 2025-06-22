@@ -1,6 +1,5 @@
 const socket = io();
 
-// Получение параметров из URL
 const params = new URLSearchParams(window.location.search);
 const roomId = params.get('roomId');
 if (!roomId) {
@@ -8,7 +7,6 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-// Telegram WebApp
 const tg = window.Telegram?.WebApp;
 if (tg) tg.expand();
 
@@ -97,14 +95,12 @@ async function fetchRoom() {
 }
 fetchRoom();
 
-// История чата
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 
-// Отправка сообщения
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
 
@@ -115,7 +111,6 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// Состояние плеера
 socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
   player.currentTime = position;
@@ -129,7 +124,6 @@ socket.on('player_update', ({ position = 0, is_paused }) => {
   setTimeout(() => (isSeeking = false), 200);
 });
 
-// Участники
 socket.on('members', members => {
   membersList.innerHTML = `<div class="chat-members-label">Участники:</div>
     <ul>${members.map(id => `<li>${id}</li>`).join('')}</ul>`;

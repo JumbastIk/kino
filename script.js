@@ -3,7 +3,17 @@ const API_BASE = window.location.origin.includes('localhost')
   : 'https://kino-fhwp.onrender.com';
 
 const API_URL = `${API_BASE}/api/rooms`;
-const socket  = io(API_BASE);
+// Подключение socket с передачей origin, без Referer
+const socket = io(API_BASE, {
+  transports: ['websocket'],
+  transportOptions: {
+    polling: {
+      extraHeaders: {
+        Referer: ''
+      }
+    }
+  }
+});
 
 function createMovieCard(movie) {
   const link = document.createElement('a');
@@ -87,7 +97,7 @@ function addRoomToSlider(room, highlight = false) {
   }
   slide.innerHTML = `
     <a
-      href="${API_BASE}/room.html?roomId=${encodeURIComponent(room.id)}"
+      href="room.html?roomId=${encodeURIComponent(room.id)}"
       class="room-link"
       style="text-decoration:none; color:inherit;"
     >
@@ -160,6 +170,5 @@ document.addEventListener('DOMContentLoaded', () => {
   renderCategories();
   initSliderControls();
   renderRooms();
-
   window.createRoom = createRoom;
 });

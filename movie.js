@@ -47,7 +47,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const res = await fetch(`${API_BASE}/api/rooms`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Referer': '' // Явно отключаем Referer
+        },
         body: JSON.stringify({
           title: movie.title,
           movieId: movie.id
