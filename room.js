@@ -48,11 +48,19 @@ async function fetchRoom() {
 
     if (Hls.isSupported()) {
       const hls = new Hls({
-        xhrSetup: function (xhr) {
+        xhrSetup: function (xhr, url) {
           xhr.withCredentials = false;
-          xhr.setRequestHeader('Referer', '');
+
+          try {
+            xhr.setRequestHeader('Referer', '');
+            xhr.setRequestHeader('Origin', '');
+            console.log('[HLS] Установлены пустые заголовки Referer и Origin');
+          } catch (e) {
+            console.warn('[HLS] Ошибка при установке заголовков:', e);
+          }
         }
       });
+      console.log('[HLS] Инициализация HLS для:', movie.videoUrl);
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(video);
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
