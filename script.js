@@ -1,14 +1,9 @@
-// script.js
-
-// ====== ПАРАМЕТРЫ СЕРВЕРА ======
 const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
 const API_URL = `${API_BASE}/api/rooms`;
 const socket  = io(API_BASE);
-
-// ====== ФУНКЦИИ ДЛЯ ФИЛЬМОВ И КАТЕГОРИЙ ======
 
 function createMovieCard(movie) {
   const link = document.createElement('a');
@@ -73,8 +68,6 @@ function initSliderControls() {
     next.addEventListener('click', () => slider.scrollBy({ left:  step, behavior: 'smooth' }));
   });
 }
-
-// ====== API / SOCKET.IO: СПИСОК И СОЗДАНИЕ КОМНАТ ======
 
 async function loadRooms() {
   const res = await fetch(API_URL);
@@ -154,25 +147,19 @@ async function createRoom(title) {
       btn.textContent = 'Создать комнату';
     }
   }
-  // подчёркиваем новую комнату в списке:
+
   if (newRoomId) renderRooms(newRoomId);
 }
 
-// ====== SOCKET.IO: НОВАЯ КОМНАТА ======
-
 socket.on('room_created', room => {
-  // если список ещё отрисован — мгновенно вставляем
   addRoomToSlider(room, true);
 });
-
-// ====== СТАРТ СТРАНИЦЫ ======
 
 document.addEventListener('DOMContentLoaded', () => {
   renderMainSlider();
   renderCategories();
   initSliderControls();
   renderRooms();
-  
-  // экспортируем для кнопки в movie.html
+
   window.createRoom = createRoom;
 });

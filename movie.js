@@ -1,12 +1,10 @@
 // movie.js
 
-// Адаптивный базовый URL API (чтобы работало и на localhost, и в проде)
 const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
 document.addEventListener('DOMContentLoaded', () => {
-  // 1) Получаем ID фильма из URL
   const params = new URLSearchParams(window.location.search);
   const movieId = params.get('id');
   if (!movieId) {
@@ -14,14 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  // 2) Ищем фильм в data.js
   const movie = movies.find(m => m.id === movieId);
   if (!movie) {
     document.body.innerHTML = '<p style="color:#f55; text-align:center; margin-top:50px;">Фильм не найден.</p>';
     return;
   }
 
-  // 3) Рендерим постер и описание
   const container = document.getElementById('detailContainer');
   container.innerHTML = `
     <img
@@ -35,11 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
   `;
 
-  // 4) Настраиваем ссылку «Назад»
   const backLink = document.getElementById('backLink');
   backLink.href = 'index.html';
 
-  // 5) Рисуем кнопку «Создать комнату»
   const btnWrap = document.getElementById('roomBtnContainer');
   const linkContainer = document.getElementById('newRoomLink');
   const btn = document.createElement('button');
@@ -48,7 +42,6 @@ document.addEventListener('DOMContentLoaded', () => {
   btn.textContent = 'Создать комнату';
   btnWrap.appendChild(btn);
 
-  // 6) Обработчик клика по кнопке
   btn.addEventListener('click', async e => {
     e.preventDefault();
     btn.disabled = true;
@@ -67,7 +60,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const { id } = await res.json();
       if (id) {
-        // 7) Показываем ссылку на новую комнату
         const roomURL = `room.html?roomId=${encodeURIComponent(id)}`;
         linkContainer.innerHTML = `
           <strong>Комната создана:</strong>

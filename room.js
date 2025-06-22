@@ -4,6 +4,8 @@ const API_BASE = window.location.origin.includes('localhost')
 const socket = io(API_BASE);
 
 let videoEl, currentRoomId, currentUser;
+let lastSentTime = 0;
+let lastSentTimestamp = 0;
 
 function showError(msg) {
   document.body.innerHTML = `
@@ -34,11 +36,16 @@ function applyState({ position, is_paused }) {
 }
 
 function sendState(is_paused) {
-  socket.emit('player_action', {
-    roomId: currentRoomId,
-    position: videoEl.currentTime,
-    is_paused
-  });
+  const now = videoEl.currentTime;
+  if (Math.abs(now - lastSentTime) > 0.5 || Date.now() - lastSentTimestamp > 3000) {
+    socket.emit('player_action', {
+      roomId: currentRoomId,
+      position: now,
+      is_paused
+    });
+    lastSentTime = now;
+    lastSentTimestamp = Date.now();
+  }
 }
 
 function sendMessage() {
@@ -62,6 +69,11 @@ async function loadHistory(roomId) {
     console.warn('Историю чата загрузить не удалось:', e);
     return [];
   }
+}
+
+function heartbeatSync() {
+  socket.emit('request_state', { roomId: currentRoomId });
+  setTimeout(heartbeatSync, 5000);
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -95,7 +107,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('backLink').href =
     `movie.html?id=${encodeURIComponent(movie.id)}`;
 
-  // Используем videoUrl напрямую, так как это .m3u8
   const hlsUrl = movie.videoUrl;
 
   videoEl = document.createElement('video');
@@ -120,7 +131,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   socket.emit('join', { roomId: currentRoomId, userData: currentUser });
   socket.on('sync_state', applyState);
   socket.on('player_update', applyState);
+  socket.on('current_state', applyState);
   socket.on('chat_message', appendMessage);
+
+  heartbeatSync();
 
   videoEl.addEventListener('play', () => sendState(false));
   videoEl.addEventListener('pause', () => sendState(true));
