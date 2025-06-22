@@ -46,21 +46,21 @@ async function fetchRoom() {
     playerWrapper.innerHTML = `<video id="videoPlayer" class="video-player" controls crossorigin="anonymous"></video>`;
     const video = document.getElementById('videoPlayer');
 
+    console.log('[HLS] URL видео:', movie.videoUrl);
+    console.log('[HLS] Источник сайта:', window.location.origin);
+
     if (Hls.isSupported()) {
       const hls = new Hls({
         xhrSetup: function (xhr, url) {
           xhr.withCredentials = false;
-
-          try {
-            xhr.setRequestHeader('Referer', '');
-            xhr.setRequestHeader('Origin', '');
-            console.log('[HLS] Установлены пустые заголовки Referer и Origin');
-          } catch (e) {
-            console.warn('[HLS] Ошибка при установке заголовков:', e);
-          }
+          xhr.onerror = () => {
+            console.error('[HLS] Ошибка при загрузке HLS-потока:', url);
+            alert(
+              '❌ Видео не загружается.\nВозможно, сервер заблокировал запрос из-за заголовка Referer.\n\nИсточник: ' + window.location.origin
+            );
+          };
         }
       });
-      console.log('[HLS] Инициализация HLS для:', movie.videoUrl);
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(video);
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
