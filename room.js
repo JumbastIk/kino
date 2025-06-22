@@ -7,13 +7,8 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-const tg = window.Telegram?.WebApp;
-if (tg) {
-  tg.ready();
-  tg.expand();
-}
-
-const user = tg?.initDataUnsafe?.user || {
+// Простой пользователь по умолчанию
+const user = {
   id: Date.now(),
   first_name: 'Гость'
 };
