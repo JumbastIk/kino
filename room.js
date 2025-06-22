@@ -43,20 +43,25 @@ async function fetchRoom() {
 
     backLink.href = `movie.html?id=${movie.id}`;
 
-    playerWrapper.innerHTML = `<video id="videoPlayer" class="video-player" controls crossorigin="anonymous"></video>`;
+    playerWrapper.innerHTML = `<video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline></video>`;
     const video = document.getElementById('videoPlayer');
 
-    console.log('[HLS] URL видео:', movie.videoUrl);
-    console.log('[HLS] Источник сайта:', window.location.origin);
+    console.log('[INFO] HLS URL:', movie.videoUrl);
+    console.log('[INFO] Источник:', window.location.origin);
+    console.log('[INFO] Протокол:', location.protocol);
 
     if (Hls.isSupported()) {
       const hls = new Hls({
         xhrSetup: function (xhr, url) {
           xhr.withCredentials = false;
+          xhr.onload = () => console.log('[HLS] Загружен сегмент:', url);
           xhr.onerror = () => {
-            console.error('[HLS] Ошибка при загрузке HLS-потока:', url);
+            console.error('[HLS] ❌ Ошибка загрузки сегмента:', url);
             alert(
-              '❌ Видео не загружается.\nВозможно, сервер заблокировал запрос из-за заголовка Referer.\n\nИсточник: ' + window.location.origin
+              'Ошибка загрузки HLS потока.\n\nВозможная причина: сервер блокирует запрос по заголовку Referer или Origin.\n\nURL: ' +
+              movie.videoUrl +
+              '\nИсточник: ' + window.location.origin +
+              '\n\nРешение:\n✔ Проверь настройки Pull Zone в BunnyCDN\n✔ Разреши домен: ' + window.location.origin
             );
           };
         }
@@ -97,8 +102,8 @@ async function fetchRoom() {
 
     player = video;
   } catch (err) {
-    console.error('Ошибка загрузки комнаты:', err);
-    playerWrapper.innerHTML = '<p class="error">Ошибка загрузки комнаты</p>';
+    console.error('[ERROR] Ошибка загрузки комнаты:', err);
+    playerWrapper.innerHTML = `<p class="error">Ошибка загрузки комнаты: ${err.message}</p>`;
   }
 }
 fetchRoom();
