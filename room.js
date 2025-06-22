@@ -1,27 +1,30 @@
+// room.js (v=1.0)
 const socket = io();
 
 // Получение параметров из URL
 const params = new URLSearchParams(window.location.search);
 const roomId = params.get('roomId');
-
 if (!roomId) {
   alert('Не указан ID комнаты.');
   location.href = 'index.html';
 }
 
-const tg = window.Telegram.WebApp;
-tg.expand();
+// Telegram WebApp (если используется внутри Telegram)
+const tg = window.Telegram?.WebApp;
+if (tg) tg.expand();
 
 // Получение данных пользователя Telegram
-const user = tg.initDataUnsafe.user || {
+const user = (tg?.initDataUnsafe?.user) || {
   id: Date.now(),
   first_name: 'Гость'
 };
 
+// Базовый API URL
 const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000'
   : window.location.origin;
 
+// Получаем DOM-элементы
 const playerWrapper = document.getElementById('playerWrapper');
 const backLink = document.getElementById('backLink');
 const msgInput = document.getElementById('msgInput');
@@ -29,73 +32,62 @@ const sendBtn = document.getElementById('sendBtn');
 const messagesBox = document.getElementById('messages');
 const membersList = document.getElementById('membersList');
 
-// Подключение к комнате
-socket.emit('join', {
-  roomId,
-  userData: user
-});
-
-// Запрос текущего состояния плеера
-socket.emit('request_state', { roomId });
-
 let player;
 let isSeeking = false;
 
-// Получение информации о комнате
+// Подключаемся к комнате
+socket.emit('join', { roomId, userData: user });
+socket.emit('request_state', { roomId });
+
+// Получаем комнату, фильм, и инициализируем плеер
 async function fetchRoom() {
   try {
     const res = await fetch(`${API_BASE}/api/rooms/${roomId}`);
     const data = await res.json();
+    if (!data) throw new Error('Комната не найдена');
     const movie = movies.find(m => m.id === data.movie_id);
-    if (!movie) throw new Error('Фильм не найден.');
+    if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
 
     backLink.href = `movie.html?id=${movie.id}`;
 
-    playerWrapper.innerHTML = `
-      <video id="videoPlayer" class="video-player" controls></video>
-    `;
-
+    // Вставляем плеер
+    playerWrapper.innerHTML = `<video id="videoPlayer" class="video-player" controls></video>`;
     const video = document.getElementById('videoPlayer');
 
+    // Подключаем HLS.js
     if (Hls.isSupported()) {
       const hls = new Hls();
-      hls.loadSource(movie.src);
+      hls.loadSource(movie.videoUrl);
       hls.attachMedia(video);
     } else {
-      video.src = movie.src;
+      video.src = movie.videoUrl;
     }
 
+    // Отправка действий пользователем
     video.addEventListener('play', () => {
-      if (!isSeeking) {
-        socket.emit('player_action', {
-          roomId,
-          position: video.currentTime,
-          is_paused: false
-        });
-      }
+      if (!isSeeking) socket.emit('player_action', {
+        roomId,
+        position: video.currentTime,
+        is_paused: false
+      });
     });
 
     video.addEventListener('pause', () => {
-      if (!isSeeking) {
-        socket.emit('player_action', {
-          roomId,
-          position: video.currentTime,
-          is_paused: true
-        });
-      }
+      if (!isSeeking) socket.emit('player_action', {
+        roomId,
+        position: video.currentTime,
+        is_paused: true
+      });
     });
 
-    video.addEventListener('seeking', () => {
-      isSeeking = true;
-    });
-
+    video.addEventListener('seeking', () => { isSeeking = true; });
     video.addEventListener('seeked', () => {
       socket.emit('player_action', {
         roomId,
         position: video.currentTime,
         is_paused: video.paused
       });
-      isSeeking = false;
+      setTimeout(() => (isSeeking = false), 200);
     });
 
     player = video;
@@ -104,76 +96,51 @@ async function fetchRoom() {
     playerWrapper.innerHTML = '<p class="error">Ошибка загрузки комнаты</p>';
   }
 }
-
 fetchRoom();
 
-// Получение истории сообщений
+// Chat: вывод истории и новых сообщений
 socket.on('history', data => {
   messagesBox.innerHTML = '';
-  data.forEach(({ author, text, created_at }) => {
-    appendMessage(author, text, created_at);
-  });
-  messagesBox.scrollTop = messagesBox.scrollHeight;
+  data.forEach(m => appendMessage(m.author, m.text));
 });
+socket.on('chat_message', m => appendMessage(m.author, m.text));
 
-// Получение новых сообщений
-socket.on('chat_message', ({ author, text, created_at }) => {
-  appendMessage(author, text, created_at);
-});
-
-// Обновление участников
-socket.on('members', members => {
-  membersList.innerHTML = `
-    <div class="chat-members-label">Участники:</div>
-    <ul>${members.map(id => `<li>${id}</li>`).join('')}</ul>
-  `;
-});
-
-// Синхронизация плеера
-socket.on('sync_state', ({ position, is_paused }) => {
-  if (!player) return;
-  player.currentTime = position;
-  if (is_paused) {
-    player.pause();
-  } else {
-    player.play();
-  }
-});
-
-// Обновление состояния плеера от других
-socket.on('player_update', ({ position, is_paused }) => {
-  if (!player) return;
-  isSeeking = true;
-  player.currentTime = position;
-  if (is_paused) {
-    player.pause();
-  } else {
-    player.play();
-  }
-  setTimeout(() => (isSeeking = false), 500);
-});
-
-// Отправка сообщения
+// Chat: отправка
 sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') sendMessage();
-});
+msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
 
 function sendMessage() {
   const text = msgInput.value.trim();
   if (!text) return;
-  socket.emit('chat_message', {
-    roomId,
-    author: user.first_name,
-    text
-  });
+  socket.emit('chat_message', { roomId, author: user.first_name, text });
   msgInput.value = '';
 }
 
-function appendMessage(author, text, created_at) {
-  const msg = document.createElement('div');
-  msg.className = 'chat-message';
-  msg.innerHTML = `<strong>${author}:</strong> ${text}`;
-  messagesBox.appendChild(msg);
+// Слушатели плеера
+socket.on('sync_state', state => {
+  if (!player) return;
+  player.currentTime = state.position || 0;
+  state.is_paused ? player.pause() : player.play();
+});
+socket.on('player_update', state => {
+  if (!player) return;
+  isSeeking = true;
+  player.currentTime = state.position || 0;
+  state.is_paused ? player.pause() : player.play();
+  setTimeout(() => (isSeeking = false), 200);
+});
+
+// Участники
+socket.on('members', members => {
+  membersList.innerHTML = `<div class="chat-members-label">Участники:</div>
+    <ul>${members.map(id => `<li>${id}</li>`).join('')}</ul>`;
+});
+
+// Добавление сообщения в окно
+function appendMessage(author, text) {
+  const div = document.createElement('div');
+  div.className = 'chat-message';
+  div.innerHTML = `<strong>${author}:</strong> ${text}`;
+  messagesBox.appendChild(div);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
