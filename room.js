@@ -1,4 +1,3 @@
-// room.js (v=1.0)
 const socket = io();
 
 // Получение параметров из URL
@@ -9,22 +8,19 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-// Telegram WebApp (если используется внутри Telegram)
+// Telegram WebApp
 const tg = window.Telegram?.WebApp;
 if (tg) tg.expand();
 
-// Получение данных пользователя Telegram
-const user = (tg?.initDataUnsafe?.user) || {
+const user = tg?.initDataUnsafe?.user || {
   id: Date.now(),
   first_name: 'Гость'
 };
 
-// Базовый API URL
 const API_BASE = window.location.origin.includes('localhost')
   ? 'http://localhost:3000'
   : window.location.origin;
 
-// Получаем DOM-элементы
 const playerWrapper = document.getElementById('playerWrapper');
 const backLink = document.getElementById('backLink');
 const msgInput = document.getElementById('msgInput');
@@ -35,35 +31,38 @@ const membersList = document.getElementById('membersList');
 let player;
 let isSeeking = false;
 
-// Подключаемся к комнате
 socket.emit('join', { roomId, userData: user });
 socket.emit('request_state', { roomId });
 
-// Получаем комнату, фильм, и инициализируем плеер
 async function fetchRoom() {
   try {
     const res = await fetch(`${API_BASE}/api/rooms/${roomId}`);
-    const data = await res.json();
-    if (!data) throw new Error('Комната не найдена');
-    const movie = movies.find(m => m.id === data.movie_id);
+    const roomData = await res.json();
+    if (!roomData) throw new Error('Комната не найдена');
+
+    const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
 
     backLink.href = `movie.html?id=${movie.id}`;
 
-    // Вставляем плеер
-    playerWrapper.innerHTML = `<video id="videoPlayer" class="video-player" controls></video>`;
+    playerWrapper.innerHTML = `<video id="videoPlayer" class="video-player" controls crossorigin="anonymous"></video>`;
     const video = document.getElementById('videoPlayer');
 
-    // Подключаем HLS.js
     if (Hls.isSupported()) {
-      const hls = new Hls();
+      const hls = new Hls({
+        xhrSetup: function (xhr) {
+          xhr.withCredentials = false;
+          xhr.setRequestHeader('Referer', '');
+        }
+      });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(video);
-    } else {
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
+    } else {
+      throw new Error('Ваш браузер не поддерживает HLS');
     }
 
-    // Отправка действий пользователем
     video.addEventListener('play', () => {
       if (!isSeeking) socket.emit('player_action', {
         roomId,
@@ -98,14 +97,14 @@ async function fetchRoom() {
 }
 fetchRoom();
 
-// Chat: вывод истории и новых сообщений
+// История чата
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 
-// Chat: отправка
+// Отправка сообщения
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
 
@@ -116,17 +115,17 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// Слушатели плеера
-socket.on('sync_state', state => {
+// Состояние плеера
+socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
-  player.currentTime = state.position || 0;
-  state.is_paused ? player.pause() : player.play();
+  player.currentTime = position;
+  is_paused ? player.pause() : player.play();
 });
-socket.on('player_update', state => {
+socket.on('player_update', ({ position = 0, is_paused }) => {
   if (!player) return;
   isSeeking = true;
-  player.currentTime = state.position || 0;
-  state.is_paused ? player.pause() : player.play();
+  player.currentTime = position;
+  is_paused ? player.pause() : player.play();
   setTimeout(() => (isSeeking = false), 200);
 });
 
@@ -136,7 +135,6 @@ socket.on('members', members => {
     <ul>${members.map(id => `<li>${id}</li>`).join('')}</ul>`;
 });
 
-// Добавление сообщения в окно
 function appendMessage(author, text) {
   const div = document.createElement('div');
   div.className = 'chat-message';
