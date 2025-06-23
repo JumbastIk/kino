@@ -26,6 +26,7 @@ let player, isSeeking = false, isRemoteAction = false;
 // ====== ГОЛОСОВОЙ ЧАТ (Push-to-Talk) ======
 let localStream = null;
 const peers = {};
+let peerIds = []; // Всегда актуальный список peer id (кроме себя)
 
 // Кнопка микрофона
 const micBtn = document.createElement('button');
@@ -33,76 +34,53 @@ micBtn.textContent = '🎤';
 micBtn.className = 'mic-btn';
 document.querySelector('.chat-input-wrap').appendChild(micBtn);
 
-let micTracks = []; // Список текущих треков
 let isTalking = false;
 
-// Получить id всех peer'ов в комнате, кроме себя
-async function getPeerIds() {
-  const res = await fetch(`${BACKEND}/api/rooms/${roomId}/members`);
-  const { data: members } = await res.json();
-  return members.map(m => m.user_id).filter(id => id !== socket.id);
-}
+// --- Используем только сокетовые данные об участниках! ---
+socket.on('members', members => {
+  peerIds = members.map(m => m.user_id).filter(id => id !== socket.id);
+  membersList.innerHTML =
+    `<div class="chat-members-label">Участники (${members.length}):</div>
+    <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
 
-// Функция добавить аудиотреки в peer
-function addAudioTracksToPeers() {
-  if (!localStream) return;
-  for (const pc of Object.values(peers)) {
-    localStream.getAudioTracks().forEach(track => {
-      micTracks.push(pc.addTrack(track, localStream));
-    });
-  }
-}
+  // Добавляем peer соединения к новым участникам
+  peerIds.forEach(id => {
+    if (!peers[id]) createPeer(id, true);
+  });
+  // Удаляем peer'ы тех, кто вышел
+  Object.keys(peers).forEach(id => {
+    if (!peerIds.includes(id)) {
+      peers[id].close();
+      delete peers[id];
+      const audio = document.getElementById(`audio_${id}`);
+      if (audio) audio.remove();
+    }
+  });
+});
 
-// Функция удалить аудиотреки из peer (mute)
-function removeAudioTracksFromPeers() {
-  for (const pc of Object.values(peers)) {
-    pc.getSenders().forEach(sender => {
-      if (sender.track && sender.track.kind === 'audio') {
-        pc.removeTrack(sender);
-      }
-    });
-  }
-  micTracks = [];
-}
-
-// ВКЛЮЧЕНИЕ микрофона (по нажатию)
+// --- Push-to-Talk микрофон ---
 micBtn.addEventListener('mousedown', async () => {
   if (isTalking) return;
   isTalking = true;
   micBtn.classList.add('active');
-
-  if (!localStream) {
-    try {
+  try {
+    if (!localStream) {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (e) {
-      alert('Нет доступа к микрофону');
-      micBtn.classList.remove('active');
-      isTalking = false;
-      return;
     }
+    addAudioTracksToPeers();
+    socket.emit('new_peer', { roomId, from: socket.id });
+  } catch (e) {
+    alert('Нет доступа к микрофону');
+    micBtn.classList.remove('active');
+    isTalking = false;
   }
-
-  // 1. Подключаемся ко всем peer'ам
-  for (const id of await getPeerIds()) {
-    if (!peers[id]) await createPeer(id, true);
-  }
-  // 2. Добавляем аудио в каждый peer
-  addAudioTracksToPeers();
-
-  // Сообщаем о себе в комнату (если только зашёл)
-  socket.emit('new_peer', { roomId, from: socket.id });
 });
-
-// ВЫКЛЮЧЕНИЕ микрофона (по отпусканию)
 micBtn.addEventListener('mouseup', () => {
   if (!isTalking) return;
   isTalking = false;
   micBtn.classList.remove('active');
   removeAudioTracksFromPeers();
-  // Не трогаем сами PeerConnection!
 });
-
-// Touch для мобилок
 micBtn.addEventListener('touchstart', e => {
   e.preventDefault();
   micBtn.dispatchEvent(new MouseEvent('mousedown'));
@@ -112,7 +90,25 @@ micBtn.addEventListener('touchend', e => {
   micBtn.dispatchEvent(new MouseEvent('mouseup'));
 });
 
-// ========== WebRTC ==========
+function addAudioTracksToPeers() {
+  if (!localStream) return;
+  for (const pc of Object.values(peers)) {
+    localStream.getAudioTracks().forEach(track => {
+      pc.addTrack(track, localStream);
+    });
+  }
+}
+function removeAudioTracksFromPeers() {
+  for (const pc of Object.values(peers)) {
+    pc.getSenders().forEach(sender => {
+      if (sender.track && sender.track.kind === 'audio') {
+        pc.removeTrack(sender);
+      }
+    });
+  }
+}
+
+// --- WebRTC handshake ---
 socket.on('new_peer', async ({ from }) => {
   if (from === socket.id) return;
   if (!peers[from]) await createPeer(from, false);
@@ -130,17 +126,16 @@ socket.on('signal', async ({ from, description, candidate }) => {
   if (candidate) await pc.addIceCandidate(candidate);
 });
 
-// Создание peer-соединения
 async function createPeer(peerId, isOffer) {
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   });
   peers[peerId] = pc;
 
-  // Текущий аудиотрек добавится при зажатом микрофоне
+  // Подключаем текущий микрофон (если включён)
   if (localStream && isTalking) {
     localStream.getAudioTracks().forEach(track => {
-      micTracks.push(pc.addTrack(track, localStream));
+      pc.addTrack(track, localStream);
     });
   }
 
@@ -169,17 +164,10 @@ async function createPeer(peerId, isOffer) {
   return pc;
 }
 
-// =========== Всё остальное UI ===========
-// ... (весь оставшийся код из твоего файла, без изменений)
+// =========== Всё остальное UI, плеер и чат ===========
 
 socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
-
-socket.on('members', members => {
-  membersList.innerHTML =
-    `<div class="chat-members-label">Участники (${members.length}):</div>
-    <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
-});
 
 socket.on('history', data => {
   messagesBox.innerHTML = '';
