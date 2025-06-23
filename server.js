@@ -16,6 +16,7 @@ app.use(cors({
   origin: [
     'https://kino-fhwp.onrender.com',
     'https://dsgsasd.ru',
+    'https://www.dsgsasd.ru',
     'https://web.telegram.org'
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -136,6 +137,7 @@ const io = new Server(server, {
     origin: [
       'https://kino-fhwp.onrender.com',
       'https://dsgsasd.ru',
+      'https://www.dsgsasd.ru',
       'https://web.telegram.org'
     ],
     methods: ['GET','POST'],
@@ -217,10 +219,10 @@ io.on('connection', socket => {
   // действия плеера: play/pause/seek
   socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
     roomsState[roomId] = {
-      time:       position,
-      playing:   !is_paused,
+      time:        position,
+      playing:     !is_paused,
       speed,
-      lastUpdate: Date.now()
+      lastUpdate:  Date.now()
     };
     socket.to(roomId).emit('player_update', { position, is_paused, speed });
   });

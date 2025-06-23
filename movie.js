@@ -5,7 +5,7 @@ const API_BASE = window.location.hostname.includes('localhost')
   : 'https://kino-fhwp.onrender.com';
 
 document.addEventListener('DOMContentLoaded', () => {
-  const params = new URLSearchParams(window.location.search);
+  const params  = new URLSearchParams(window.location.search);
   const movieId = params.get('id');
 
   if (!movieId) {
@@ -43,15 +43,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Кнопка создания комнаты
   const btnWrap        = document.getElementById('roomBtnContainer');
-  const linkContainer = document.getElementById('newRoomLink');
+  const linkContainer  = document.getElementById('newRoomLink');
   const btn            = document.createElement('button');
 
-  btn.id        = 'createRoomBtn';
-  btn.className = 'create-room-btn';
+  btn.id          = 'createRoomBtn';
+  btn.type        = 'button';           // <-- обязательно!
+  btn.className   = 'create-room-btn';
   btn.textContent = 'Создать комнату';
   btnWrap.appendChild(btn);
 
-  btn.addEventListener('click', async () => {
+  btn.addEventListener('click', async e => {
+    e.preventDefault();                 // <-- и это тоже
     btn.disabled    = true;
     btn.textContent = 'Создание...';
 
@@ -59,7 +61,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch(`${API_BASE}/api/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // убираем Referer, чтобы Telegram WebView не ставил свой
         referrerPolicy: 'no-referrer',
         body: JSON.stringify({
           title:   movie.title,
@@ -81,10 +82,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <strong>Комната создана:</strong><br/>
         <a href="${roomURL}">${roomURL}</a>
       `;
-
-      // Если хотите сразу переходить в комнату, раскомментируйте:
-      // location.href = roomURL;
-
     } catch (err) {
       console.error('Ошибка при создании комнаты:', err);
       linkContainer.innerHTML = `
