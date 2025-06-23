@@ -1,5 +1,8 @@
 // server.js
 
+// ============================================================================
+// Импорты и настройка базовых модулей
+// ============================================================================
 require('dotenv').config();
 const http      = require('http');
 const express   = require('express');
@@ -11,7 +14,11 @@ const supabase  = require('./supabase');
 
 const app = express();
 
-// --- CORS: разрешаем фронту и WebView Telegram ---
+
+
+// ============================================================================
+// CORS: раздаём разрешения для фронта и Telegram WebView
+// ============================================================================
 app.use(cors({
   origin: [
     'https://kino-fhwp.onrender.com',
@@ -25,10 +32,21 @@ app.use(cors({
 }));
 app.options('*', cors()); // для preflight-запросов
 
+
+
+// ============================================================================
+// Middleware: парсинг JSON и отдача статических файлов из корня проекта
+// ============================================================================
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// — API для списка комнат —
+
+
+// ============================================================================
+// API для управления комнатами и чатами
+// ============================================================================
+
+// Список всех комнат
 app.get('/api/rooms', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -43,7 +61,9 @@ app.get('/api/rooms', async (req, res) => {
   }
 });
 
-// — API для одной комнаты по ID —
+
+
+// Получение данных конкретной комнаты по ID
 app.get('/api/rooms/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -59,7 +79,9 @@ app.get('/api/rooms/:id', async (req, res) => {
   }
 });
 
-// — Создание новой комнаты —
+
+
+// Создание новой комнаты
 app.post('/api/rooms', async (req, res) => {
   try {
     const { title, movieId } = req.body;
@@ -90,7 +112,9 @@ app.post('/api/rooms', async (req, res) => {
   }
 });
 
-// — API для истории чата —
+
+
+// Получение истории чата для комнаты
 app.get('/api/messages/:roomId', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -106,7 +130,9 @@ app.get('/api/messages/:roomId', async (req, res) => {
   }
 });
 
-// — Отправка нового сообщения —
+
+
+// Отправка нового сообщения в чат
 app.post('/api/messages', async (req, res) => {
   try {
     const { room_id, author, text } = req.body;
@@ -121,7 +147,11 @@ app.post('/api/messages', async (req, res) => {
   }
 });
 
-// — SPA fallback для фронтенда —
+
+
+// ============================================================================
+// SPA–fallback: любым другим запросам отдать index.html (для frontend routing)
+// ============================================================================
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const index = path.join(__dirname, 'index.html');
   if (fs.existsSync(index)) {
@@ -130,7 +160,12 @@ app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   res.status(404).send('index.html not found');
 });
 
-// — HTTP + WebSocket серверы —
+
+
+// ============================================================================
+// Настройка HTTP + WebSocket серверов
+// ============================================================================
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -151,14 +186,17 @@ io.on('connection', socket => {
   let currentRoom = null;
   let userId      = null;
 
-  // присоединение пользователя к комнате
+
+  // -------------------------------
+  // Событие join — пользователь вошёл в комнату
+  // -------------------------------
   socket.on('join', async ({ roomId, userData }) => {
     try {
       currentRoom = roomId;
       userId      = userData.id;
       socket.join(roomId);
 
-      // upsert участника (id + имя)
+      // Добавляем/обновляем запись в room_members
       await supabase
         .from('room_members')
         .upsert({
@@ -167,26 +205,22 @@ io.on('connection', socket => {
           user_name: userData.first_name
         }, { onConflict: ['room_id','user_id'] });
 
-      // собираем список участников
-      const { data: members, error: membersErr } = await supabase
+      // Выбираем актуальный список участников и рассылаем всем в комнате
+      const { data: members } = await supabase
         .from('room_members')
         .select('user_id, user_name')
         .eq('room_id', roomId);
-      if (!membersErr) {
-        io.to(roomId).emit('members', members);
-      }
+      io.to(roomId).emit('members', members);
 
-      // шлём историю чата
-      const { data: messages, error: msgsErr } = await supabase
+      // Шлём историю чата только этому сокету
+      const { data: messages } = await supabase
         .from('messages')
         .select('author, text, created_at')
         .eq('room_id', roomId)
         .order('created_at', { ascending: true });
-      if (!msgsErr) {
-        socket.emit('history', messages);
-      }
+      socket.emit('history', messages);
 
-      // шлём актуальное состояние плеера
+      // Синхронизация состояния плеера
       const state = roomsState[roomId] || { time: 0, playing: false, speed: 1 };
       socket.emit('sync_state', {
         position:  state.time,
@@ -198,7 +232,11 @@ io.on('connection', socket => {
     }
   });
 
-  // получение/рассылка нового сообщения
+
+
+  // -------------------------------
+  // Событие chat_message — новое сообщение
+  // -------------------------------
   socket.on('chat_message', async msg => {
     try {
       await supabase.from('messages').insert([{
@@ -216,7 +254,11 @@ io.on('connection', socket => {
     }
   });
 
-  // действия плеера: play/pause/seek
+
+
+  // -------------------------------
+  // Событие player_action — действия плеера (play/pause/seek)
+  // -------------------------------
   socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
     roomsState[roomId] = {
       time:        position,
@@ -227,7 +269,11 @@ io.on('connection', socket => {
     socket.to(roomId).emit('player_update', { position, is_paused, speed });
   });
 
-  // синхронизация состояния при запросе
+
+
+  // -------------------------------
+  // Событие request_state — запрос текущего состояния плеера
+  // -------------------------------
   socket.on('request_state', ({ roomId }) => {
     const state = roomsState[roomId] || { time: 0, playing: false, speed: 1 };
     socket.emit('sync_state', {
@@ -237,15 +283,22 @@ io.on('connection', socket => {
     });
   });
 
-  // отключение: удаляем из членов комнаты
+
+
+  // -------------------------------
+  // Событие disconnect — пользователь вышел из комнаты
+  // -------------------------------
   socket.on('disconnect', async () => {
     try {
       if (!currentRoom || !userId) return;
+
+      // Удаляем запись из room_members
       await supabase
         .from('room_members')
         .delete()
         .match({ room_id: currentRoom, user_id: userId });
 
+      // Отправляем обновлённый список участников
       const { data: members } = await supabase
         .from('room_members')
         .select('user_id, user_name')
@@ -255,9 +308,14 @@ io.on('connection', socket => {
       console.error('disconnect error:', err.message);
     }
   });
+
 });
 
-// старт сервера
+
+
+// ============================================================================
+// Запуск сервера на порту из .env или 3000
+// ============================================================================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server started on port ${PORT}`);

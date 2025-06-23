@@ -1,11 +1,9 @@
 // room.js
 
-// Определяем URL бэкенда
 const BACKEND = window.location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
-// Инициализируем Socket.IO сразу на нужном хосте
 const socket = io(BACKEND, {
   transports: ['websocket'],
   path: '/socket.io'
@@ -18,7 +16,6 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-// Простой пользователь по умолчанию
 const user = {
   id: Date.now(),
   first_name: 'Гость'
@@ -34,19 +31,73 @@ const membersList   = document.getElementById('membersList');
 let player;
 let isSeeking = false;
 
-// Сообщаем серверу, кто и в какую комнату заходит
-socket.emit('join',          { roomId, userData: user });
+socket.emit('join', { roomId, userData: user });
 socket.emit('request_state', { roomId });
+
+socket.on('members', members => {
+  if (!Array.isArray(members)) return;
+  const count = members.length;
+  const items = members.map(m => `<li>${m.user_name || m.user_id}</li>`).join('');
+  membersList.innerHTML = `
+    <div class="chat-members-label">Участники (${count}):</div>
+    <ul>${items}</ul>
+  `;
+});
+
+// Optional: если хотите пересинхронизировать число зрителей в комнате
+socket.on('room_updated', ({ id, viewers }) => {
+  if (id !== roomId) return;
+  const label = membersList.querySelector('.chat-members-label');
+  if (label) {
+    label.textContent = `Участники (${viewers}):`;
+  }
+});
+
+socket.on('history', data => {
+  messagesBox.innerHTML = '';
+  data.forEach(m => appendMessage(m.author, m.text));
+});
+socket.on('chat_message', m => appendMessage(m.author, m.text));
+
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
+
+function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+  socket.emit('chat_message', { roomId, author: user.first_name, text });
+  msgInput.value = '';
+}
+
+socket.on('sync_state', ({ position = 0, is_paused }) => {
+  if (!player) return;
+  player.currentTime = position;
+  is_paused
+    ? player.pause()
+    : player.play().catch(err =>
+        console.warn('[HLS] Автозапуск заблокирован:', err.message)
+      );
+});
+
+socket.on('player_update', ({ position = 0, is_paused }) => {
+  if (!player) return;
+  isSeeking = true;
+  player.currentTime = position;
+  is_paused
+    ? player.pause()
+    : player.play().catch(err =>
+        console.warn('[HLS] Автозапуск заблокирован:', err.message)
+      );
+  setTimeout(() => isSeeking = false, 200);
+});
 
 async function fetchRoom() {
   try {
-    // Забираем данные комнаты с правильного домена
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
     if (!roomData) throw new Error('Комната не найдена');
 
-    // Находим фильм в списке (movies должен быть подключён ранее)
     const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
 
@@ -57,7 +108,7 @@ async function fetchRoom() {
       <button id="playBtn" style="margin-top:10px;">▶ Воспроизвести</button>
     `;
 
-    const video   = document.getElementById('videoPlayer');
+    const video = document.getElementById('videoPlayer');
     const playBtn = document.getElementById('playBtn');
 
     playBtn.addEventListener('click', () => {
@@ -66,7 +117,6 @@ async function fetchRoom() {
         .catch(err => console.warn('[HLS] play() заблокирован:', err.message));
     });
 
-    // Подключаем HLS.js без лишних логов
     if (Hls.isSupported()) {
       const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
@@ -85,26 +135,25 @@ async function fetchRoom() {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
-    // Синхронизация плеера
     video.addEventListener('play', () => {
       if (!isSeeking) socket.emit('player_action', {
         roomId,
-        position:  video.currentTime,
+        position: video.currentTime,
         is_paused: false
       });
     });
     video.addEventListener('pause', () => {
       if (!isSeeking) socket.emit('player_action', {
         roomId,
-        position:  video.currentTime,
+        position: video.currentTime,
         is_paused: true
       });
     });
     video.addEventListener('seeking', () => { isSeeking = true; });
-    video.addEventListener('seeked',  () => {
+    video.addEventListener('seeked', () => {
       socket.emit('player_action', {
         roomId,
-        position:  video.currentTime,
+        position: video.currentTime,
         is_paused: video.paused
       });
       setTimeout(() => isSeeking = false, 200);
@@ -119,62 +168,6 @@ async function fetchRoom() {
 
 fetchRoom();
 
-// --- Чат и история сообщений ---
-socket.on('history', data => {
-  messagesBox.innerHTML = '';
-  data.forEach(m => appendMessage(m.author, m.text));
-});
-socket.on('chat_message', m => appendMessage(m.author, m.text));
-
-sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
-
-function sendMessage() {
-  const text = msgInput.value.trim();
-  if (!text) return;
-  socket.emit('chat_message', {
-    roomId,
-    author: user.first_name,
-    text
-  });
-  msgInput.value = '';
-}
-
-// Синхронизация состояния плеера от других клиентов
-socket.on('sync_state', ({ position = 0, is_paused }) => {
-  if (!player) return;
-  player.currentTime = position;
-  is_paused
-    ? player.pause()
-    : player.play().catch(err =>
-        console.warn('[HLS] Автозапуск заблокирован:', err.message)
-      );
-});
-
-// Обновления плеера в реальном времени
-socket.on('player_update', ({ position = 0, is_paused }) => {
-  if (!player) return;
-  isSeeking = true;
-  player.currentTime = position;
-  is_paused
-    ? player.pause()
-    : player.play().catch(err =>
-        console.warn('[HLS] Автозапуск заблокирован:', err.message)
-      );
-  setTimeout(() => isSeeking = false, 200);
-});
-
-// Список участников
-socket.on('members', members => {
-  membersList.innerHTML = `
-    <div class="chat-members-label">Участники:</div>
-    <ul>
-      ${members.map(m => `<li>${m.user_name || m.user_id}</li>`).join('')}
-    </ul>
-  `;
-});
-
-// Вспомогательная функция для чата
 function appendMessage(author, text) {
   const div = document.createElement('div');
   div.className = 'chat-message';

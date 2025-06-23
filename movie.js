@@ -25,11 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  // Отрисовываем детали фильма
   const container = document.getElementById('detailContainer');
   container.innerHTML = `
-    <img src="${movie.poster}" 
-         alt="${movie.title}" 
+    <img src="${movie.poster}"
+         alt="${movie.title}"
          class="detail-poster" />
     <div class="detail-info">
       <h1>${movie.title}</h1>
@@ -37,23 +36,21 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
   `;
 
-  // Ссылка "Назад"
   const backLink = document.getElementById('backLink');
   if (backLink) backLink.href = 'index.html';
 
-  // Кнопка создания комнаты
-  const btnWrap        = document.getElementById('roomBtnContainer');
-  const linkContainer  = document.getElementById('newRoomLink');
-  const btn            = document.createElement('button');
+  const btnWrap       = document.getElementById('roomBtnContainer');
+  const linkContainer = document.getElementById('newRoomLink');
+  const btn           = document.createElement('button');
 
   btn.id          = 'createRoomBtn';
-  btn.type        = 'button';           // <-- обязательно!
+  btn.type        = 'button';
   btn.className   = 'create-room-btn';
   btn.textContent = 'Создать комнату';
   btnWrap.appendChild(btn);
 
   btn.addEventListener('click', async e => {
-    e.preventDefault();                 // <-- и это тоже
+    e.preventDefault();
     btn.disabled    = true;
     btn.textContent = 'Создание...';
 
@@ -68,14 +65,10 @@ document.addEventListener('DOMContentLoaded', () => {
         })
       });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const { id } = await res.json();
-      if (!id) {
-        throw new Error('Не вернулся ID комнаты');
-      }
+      if (!id) throw new Error('Не вернулся ID комнаты');
 
       const roomURL = `room.html?roomId=${encodeURIComponent(id)}`;
       linkContainer.innerHTML = `
