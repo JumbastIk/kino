@@ -9,6 +9,7 @@ const socket = io(BACKEND, {
   transports: ['websocket']
 });
 
+// Получаем ID комнаты
 const params = new URLSearchParams(window.location.search);
 const roomId = params.get('roomId');
 if (!roomId) {
@@ -16,6 +17,7 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
+// Элементы страницы
 const playerWrapper = document.getElementById('playerWrapper');
 const backLink      = document.getElementById('backLink');
 const msgInput      = document.getElementById('msgInput');
@@ -27,41 +29,45 @@ let player;
 let isSeeking      = false;
 let isRemoteAction = false;
 
-// ==== WebRTC голосовой чат ====
+// ==== WebRTC голосовой чат (push-to-talk) ====
 let localStream = null;
-const peers = {}; // RTCPeerConnection по id
+const peers = {}; // { peerId: RTCPeerConnection }
 
-// создаём кнопку «Микрофон» внутри поля ввода
+// создаём кнопку «Микрофон» рядом с отправкой
 const micBtn = document.createElement('button');
-micBtn.textContent = '🎤 Вкл. микрофон';
+micBtn.textContent = '🎤 Push-to-talk';
 micBtn.className = 'mic-btn';
 document.querySelector('.chat-input-wrap').appendChild(micBtn);
 
-micBtn.addEventListener('click', async () => {
+// при удержании — включаем микрофон
+micBtn.addEventListener('mousedown', async () => {
   if (!localStream) {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micBtn.textContent = '🔇 Выкл. микрофон';
       socket.emit('new_peer', { roomId });
     } catch (err) {
       console.error('Не удалось получить микрофон:', err);
       alert('Ошибка доступа к микрофону');
+      return;
     }
-  } else {
-    localStream.getTracks().forEach(t => t.stop());
-    localStream = null;
-    micBtn.textContent = '🎤 Вкл. микрофон';
-    Object.values(peers).forEach(pc => pc.close());
-    Object.keys(peers).forEach(id => delete peers[id]);
   }
+  localStream.getAudioTracks().forEach(t => t.enabled = true);
+  micBtn.classList.add('active');
 });
 
+// при отпускании — выключаем
+micBtn.addEventListener('mouseup', () => {
+  if (!localStream) return;
+  localStream.getAudioTracks().forEach(t => t.enabled = false);
+  micBtn.classList.remove('active');
+});
+
+// Signaling для WebRTC
 socket.on('new_peer', async ({ from }) => {
   if (localStream && from !== socket.id) {
     await createPeerConnection(from, true);
   }
 });
-
 socket.on('signal', async ({ from, description, candidate }) => {
   let pc = peers[from];
   if (!pc) pc = await createPeerConnection(from, false);
@@ -79,11 +85,18 @@ socket.on('signal', async ({ from, description, candidate }) => {
 });
 
 async function createPeerConnection(peerId, isOffer) {
-  const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
   peers[peerId] = pc;
+
+  // добавляем аудио-дорожку в connection
   localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
   pc.onicecandidate = e => {
-    if (e.candidate) socket.emit('signal', { to: peerId, candidate: e.candidate });
+    if (e.candidate) {
+      socket.emit('signal', { to: peerId, candidate: e.candidate });
+    }
   };
   pc.ontrack = e => {
     let audio = document.getElementById(`audio_${peerId}`);
@@ -91,15 +104,18 @@ async function createPeerConnection(peerId, isOffer) {
       audio = document.createElement('audio');
       audio.id = `audio_${peerId}`;
       audio.autoplay = true;
+      audio.hidden = true;
       document.body.appendChild(audio);
     }
     audio.srcObject = e.streams[0];
   };
+
   if (isOffer) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     socket.emit('signal', { to: peerId, description: pc.localDescription });
   }
+
   return pc;
 }
 
@@ -107,6 +123,7 @@ async function createPeerConnection(peerId, isOffer) {
 socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
+// Обновление списка участников
 socket.on('members', members => {
   const count = Array.isArray(members) ? members.length : 0;
   membersList.innerHTML = `
@@ -115,6 +132,7 @@ socket.on('members', members => {
   `;
 });
 
+// Системные сообщения
 socket.on('system_message', ({ text }) => {
   const div = document.createElement('div');
   div.className = 'chat-system';
@@ -123,12 +141,14 @@ socket.on('system_message', ({ text }) => {
   messagesBox.scrollTop = messagesBox.scrollHeight;
 });
 
+// История и новые сообщения
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 
+// Отправка текста
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
 function sendMessage() {
@@ -138,6 +158,7 @@ function sendMessage() {
   msgInput.value = '';
 }
 
+// Синхронизация плеера
 socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
   isRemoteAction = true;
@@ -157,15 +178,21 @@ socket.on('player_update', ({ position = 0, is_paused }) => {
   }, 200);
 });
 
-// === Спиннер буферизации ===
+// Спиннер буферизации
 function createSpinner() {
   const spinner = document.createElement('div');
   spinner.className = 'buffer-spinner';
   spinner.innerHTML = '<div class="double-bounce1"></div><div class="double-bounce2"></div>';
   spinner.style.display = 'none';
+  spinner.style.position = 'absolute';
+  spinner.style.top = '50%';
+  spinner.style.left = '50%';
+  spinner.style.transform = 'translate(-50%, -50%)';
+  spinner.style.zIndex = '2';
   return spinner;
 }
 
+// Загрузка комнаты и инициализация плеера
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -178,16 +205,18 @@ async function fetchRoom() {
 
     backLink.href = `movie.html?id=${movie.id}`;
 
-    // создаём контейнер видео + спиннер
+    // Рендерим плеер + спиннер
     playerWrapper.innerHTML = '';
     const container = document.createElement('div');
     container.style.position = 'relative';
-    container.innerHTML = '<video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline style="width:100%;"></video>';
+    container.innerHTML = `
+      <video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline style="width:100%;border-radius:14px;"></video>
+    `;
     const spinner = createSpinner();
     container.appendChild(spinner);
     playerWrapper.appendChild(container);
 
-    // добавляем бейдж с ID комнаты
+    // Бейдж с ID комнаты (под плеером)
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -195,7 +224,7 @@ async function fetchRoom() {
       <code>${roomId}</code>
       <button id="copyRoomId">Копировать</button>
     `;
-    container.after(badge);
+    playerWrapper.after(badge);
     document.getElementById('copyRoomId')
       .addEventListener('click', () => {
         navigator.clipboard.writeText(roomId);
@@ -204,16 +233,16 @@ async function fetchRoom() {
 
     const video = document.getElementById('videoPlayer');
 
-    // HLS.js + буферизация
+    // HLS.js + Spinner
     if (Hls.isSupported()) {
       const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.ERROR, (_, data) => {
         console.error('[HLS] Ошибка:', data);
-        alert(`Ошибка загрузки видео.\nПроверьте CORS/CDN для ${window.location.origin}`);
+        alert(`Ошибка загрузки видео. Проверьте CORS/CDN для ${window.location.origin}`);
       });
-      video.addEventListener('waiting', () => spinner.style.display = 'block');
+      video.addEventListener('waiting',  () => spinner.style.display = 'block');
       video.addEventListener('playing', () => spinner.style.display = 'none');
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
@@ -221,7 +250,7 @@ async function fetchRoom() {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
-    // события управления плеером
+    // События управления
     video.addEventListener('play', () => {
       if (isSeeking || isRemoteAction) return;
       socket.emit('player_action', { roomId, position: video.currentTime, is_paused: false });
@@ -233,7 +262,11 @@ async function fetchRoom() {
     video.addEventListener('seeking', () => isSeeking = true);
     video.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        socket.emit('player_action', { roomId, position: video.currentTime, is_paused: video.paused });
+        socket.emit('player_action', {
+          roomId,
+          position: video.currentTime,
+          is_paused: video.paused
+        });
       }
       setTimeout(() => isSeeking = false, 200);
     });
@@ -248,7 +281,7 @@ async function fetchRoom() {
 
 fetchRoom();
 
-// утилита для чата
+// Вспомогалка для чата
 function appendMessage(author, text) {
   const div = document.createElement('div');
   div.className = 'chat-message';
