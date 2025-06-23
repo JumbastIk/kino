@@ -17,7 +17,7 @@ if (!roomId) {
 }
 
 const user = {
-  id: Date.now(),
+  id: Date.now().toString(),
   first_name: 'Гость'
 };
 
@@ -31,9 +31,11 @@ const membersList   = document.getElementById('membersList');
 let player;
 let isSeeking = false;
 
+// Сообщаем серверу о входе в комнату
 socket.emit('join', { roomId, userData: user });
 socket.emit('request_state', { roomId });
 
+// Обработка списка участников
 socket.on('members', members => {
   if (!Array.isArray(members)) return;
   const count = members.length;
@@ -44,6 +46,7 @@ socket.on('members', members => {
   `;
 });
 
+// Чат
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
@@ -51,37 +54,46 @@ socket.on('history', data => {
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 
 sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
+msgInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendMessage();
+});
 
 function sendMessage() {
   const text = msgInput.value.trim();
   if (!text) return;
-  socket.emit('chat_message', { roomId, author: user.first_name, text });
+  socket.emit('chat_message', {
+    roomId,
+    author: user.first_name,
+    text
+  });
   msgInput.value = '';
 }
 
+// Синхронизация состояния плеера при входе
 socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
   player.currentTime = position;
-  is_paused
-    ? player.pause()
-    : player.play().catch(err =>
-        console.warn('[HLS] Автозапуск заблокирован:', err.message)
-      );
+  if (is_paused) {
+    player.pause();
+  } else {
+    player.play().catch(() => {});
+  }
 });
 
+// Обновления плеера от других пользователей
 socket.on('player_update', ({ position = 0, is_paused }) => {
   if (!player) return;
   isSeeking = true;
   player.currentTime = position;
-  is_paused
-    ? player.pause()
-    : player.play().catch(err =>
-        console.warn('[HLS] Автозапуск заблокирован:', err.message)
-      );
+  if (is_paused) {
+    player.pause();
+  } else {
+    player.play().catch(() => {});
+  }
   setTimeout(() => isSeeking = false, 200);
 });
 
+// Загрузка данных комнаты и инициализация плеера
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -96,50 +108,60 @@ async function fetchRoom() {
 
     playerWrapper.innerHTML = `
       <video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline></video>
-      <button id="playBtn" style="margin-top:10px;">▶ Воспроизвести</button>
+      <button id="playBtn" class="play-btn">▶ Воспроизвести</button>
     `;
 
-    const video = document.getElementById('videoPlayer');
+    const video   = document.getElementById('videoPlayer');
     const playBtn = document.getElementById('playBtn');
 
     playBtn.addEventListener('click', () => {
       video.play()
         .then(() => playBtn.style.display = 'none')
-        .catch(err => console.warn('[HLS] play() заблокирован:', err.message));
+        .catch(() => {});
     });
 
+    // Всегда HLS.js
     if (Hls.isSupported()) {
       const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.ERROR, (event, data) => {
+      hls.on(Hls.Events.ERROR, (evt, data) => {
         console.error('[HLS] Ошибка:', data);
         alert(
-          'Ошибка загрузки видео.\n\n' +
+          'Ошибка загрузки видео.\n' +
           'Проверьте настройки CDN и CORS для домена:\n' +
           window.location.origin
         );
       });
     } else {
-      playerWrapper.innerHTML = '<p class="error">Ваш браузер не поддерживает HLS.</p>';
-      return;
+      throw new Error('Ваш браузер не поддерживает HLS');
     }
 
+    // Слушатели событий плеера
     video.addEventListener('play', () => {
-      if (!isSeeking) socket.emit('player_action', {
-        roomId,
-        position:  video.currentTime,
-        is_paused: false
-      });
+      if (!isSeeking) {
+        socket.emit('player_action', {
+          roomId,
+          position:  video.currentTime,
+          is_paused: false
+        });
+      }
     });
+
     video.addEventListener('pause', () => {
-      if (!isSeeking) socket.emit('player_action', {
-        roomId,
-        position:  video.currentTime,
-        is_paused: true
-      });
+      if (!isSeeking) {
+        socket.emit('player_action', {
+          roomId,
+          position:  video.currentTime,
+          is_paused: true
+        });
+      }
     });
-    video.addEventListener('seeking', () => { isSeeking = true; });
+
+    video.addEventListener('seeking', () => {
+      isSeeking = true;
+    });
+
     video.addEventListener('seeked', () => {
       socket.emit('player_action', {
         roomId,
