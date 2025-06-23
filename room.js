@@ -7,7 +7,6 @@ const socket = io(BACKEND, {
   transports: ['websocket']
 });
 
-// 1. Получаем ID комнаты
 const params = new URLSearchParams(window.location.search);
 const roomId = params.get('roomId');
 if (!roomId) {
@@ -15,7 +14,6 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-// 2. Ссылки на элементы DOM
 const playerWrapper = document.getElementById('playerWrapper');
 const backLink      = document.getElementById('backLink');
 const messagesBox   = document.getElementById('messages');
@@ -23,48 +21,101 @@ const membersList   = document.getElementById('membersList');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
-// 3. Переменные для синхронизации плеера
 let player, isSeeking = false, isRemoteAction = false;
 
-// 4. Push-to-Talk: WebRTC
+// ====== ГОЛОСОВОЙ ЧАТ (Push-to-Talk) ======
 let localStream = null;
 const peers = {};
 
-// 4.1. Добавляем кнопку микрофона
+// Кнопка микрофона
 const micBtn = document.createElement('button');
 micBtn.textContent = '🎤';
 micBtn.className = 'mic-btn';
 document.querySelector('.chat-input-wrap').appendChild(micBtn);
 
-// 4.2. Зажали — включаем микрофон, отпустили — выключаем
+let micTracks = []; // Список текущих треков
+let isTalking = false;
+
+// Получить id всех peer'ов в комнате, кроме себя
+async function getPeerIds() {
+  const res = await fetch(`${BACKEND}/api/rooms/${roomId}/members`);
+  const { data: members } = await res.json();
+  return members.map(m => m.user_id).filter(id => id !== socket.id);
+}
+
+// Функция добавить аудиотреки в peer
+function addAudioTracksToPeers() {
+  if (!localStream) return;
+  for (const pc of Object.values(peers)) {
+    localStream.getAudioTracks().forEach(track => {
+      micTracks.push(pc.addTrack(track, localStream));
+    });
+  }
+}
+
+// Функция удалить аудиотреки из peer (mute)
+function removeAudioTracksFromPeers() {
+  for (const pc of Object.values(peers)) {
+    pc.getSenders().forEach(sender => {
+      if (sender.track && sender.track.kind === 'audio') {
+        pc.removeTrack(sender);
+      }
+    });
+  }
+  micTracks = [];
+}
+
+// ВКЛЮЧЕНИЕ микрофона (по нажатию)
 micBtn.addEventListener('mousedown', async () => {
+  if (isTalking) return;
+  isTalking = true;
+  micBtn.classList.add('active');
+
   if (!localStream) {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      socket.emit('new_peer', { roomId, from: socket.id });
     } catch (e) {
-      console.error(e);
-      return alert('Нет доступа к микрофону');
+      alert('Нет доступа к микрофону');
+      micBtn.classList.remove('active');
+      isTalking = false;
+      return;
     }
   }
-  // создаём PeerConnection для каждого участника
+
+  // 1. Подключаемся ко всем peer'ам
   for (const id of await getPeerIds()) {
     if (!peers[id]) await createPeer(id, true);
   }
-});
-micBtn.addEventListener('mouseup', () => {
-  if (localStream) {
-    localStream.getTracks().forEach(t => t.stop());
-    localStream = null;
-    Object.values(peers).forEach(pc => pc.close());
-    Object.keys(peers).forEach(id => delete peers[id]);
-  }
+  // 2. Добавляем аудио в каждый peer
+  addAudioTracksToPeers();
+
+  // Сообщаем о себе в комнату (если только зашёл)
+  socket.emit('new_peer', { roomId, from: socket.id });
 });
 
-// 4.3. Обработка сигналов WebRTC
+// ВЫКЛЮЧЕНИЕ микрофона (по отпусканию)
+micBtn.addEventListener('mouseup', () => {
+  if (!isTalking) return;
+  isTalking = false;
+  micBtn.classList.remove('active');
+  removeAudioTracksFromPeers();
+  // Не трогаем сами PeerConnection!
+});
+
+// Touch для мобилок
+micBtn.addEventListener('touchstart', e => {
+  e.preventDefault();
+  micBtn.dispatchEvent(new MouseEvent('mousedown'));
+});
+micBtn.addEventListener('touchend', e => {
+  e.preventDefault();
+  micBtn.dispatchEvent(new MouseEvent('mouseup'));
+});
+
+// ========== WebRTC ==========
 socket.on('new_peer', async ({ from }) => {
-  if (from === socket.id || !localStream) return;
-  await createPeer(from, false);
+  if (from === socket.id) return;
+  if (!peers[from]) await createPeer(from, false);
 });
 socket.on('signal', async ({ from, description, candidate }) => {
   let pc = peers[from] || await createPeer(from, false);
@@ -79,13 +130,19 @@ socket.on('signal', async ({ from, description, candidate }) => {
   if (candidate) await pc.addIceCandidate(candidate);
 });
 
-// 4.4. Функция создания PeerConnection
+// Создание peer-соединения
 async function createPeer(peerId, isOffer) {
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   });
   peers[peerId] = pc;
-  if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+  // Текущий аудиотрек добавится при зажатом микрофоне
+  if (localStream && isTalking) {
+    localStream.getAudioTracks().forEach(track => {
+      micTracks.push(pc.addTrack(track, localStream));
+    });
+  }
 
   pc.onicecandidate = e => {
     if (e.candidate) {
@@ -112,39 +169,27 @@ async function createPeer(peerId, isOffer) {
   return pc;
 }
 
-// 4.5. Сбор списка peer IDs из БД
-async function getPeerIds() {
-  const res = await fetch(`${BACKEND}/api/rooms/${roomId}/members`);
-  const { data: members } = await res.json();
-  return members.map(m => m.user_id).filter(id => id !== socket.id);
-}
+// =========== Всё остальное UI ===========
+// ... (весь оставшийся код из твоего файла, без изменений)
 
-// 5. Socket.IO: join, sync_state
 socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
-// 5.1. Обновляем участников
 socket.on('members', members => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${members.length}):</div>
     <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
 });
 
-// 5.2. История и новые сообщения
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
-
-// 5.2.1. Сообщения о входе/выходе
 socket.on('system_message', msg => {
-  if (msg && msg.text) {
-    appendSystemMessage(msg.text);
-  }
+  if (msg && msg.text) appendSystemMessage(msg.text);
 });
 
-// 5.3. Отправка текста
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
 function sendMessage() {
@@ -154,7 +199,6 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// 5.4. Синхронизация плеера
 socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
   isRemoteAction = true;
@@ -174,7 +218,6 @@ socket.on('player_update', ({ position = 0, is_paused }) => {
   }, 200);
 });
 
-// 6. Спиннер для буфера
 function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
@@ -185,19 +228,16 @@ function createSpinner() {
   return s;
 }
 
-// 7. Инициализация плеера и UI
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
 
-    // 7.1. Назад и фильм
     const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
-    // 7.2. Отрисовываем плеер + спиннер
     playerWrapper.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.style.position = 'relative';
@@ -208,7 +248,6 @@ async function fetchRoom() {
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
-    // 7.3. Один бейдж с ID комнаты
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML =
@@ -221,7 +260,6 @@ async function fetchRoom() {
       alert('ID комнаты скопирован');
     };
 
-    // 7.4. HLS.js
     const v = document.getElementById('videoPlayer');
     if (Hls.isSupported()) {
       const hls = new Hls({ debug: false });
@@ -239,7 +277,6 @@ async function fetchRoom() {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
-    // 7.5. Слушаем play/pause/seeking
     v.addEventListener('play', () => {
       if (isSeeking || isRemoteAction) return;
       socket.emit('player_action', {
@@ -278,7 +315,6 @@ async function fetchRoom() {
 
 fetchRoom();
 
-// 8. Вспомог: вывод обычного сообщения
 function appendMessage(author, text) {
   const d = document.createElement('div');
   d.className = 'chat-message';
@@ -287,10 +323,9 @@ function appendMessage(author, text) {
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 
-// 9. Вспомог: вывод системного сообщения
 function appendSystemMessage(text) {
   const d = document.createElement('div');
-  d.className = 'chat-message system-message'; // Добавь стили в CSS если нужно
+  d.className = 'chat-message system-message';
   d.innerHTML = `<em>${text}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
