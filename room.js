@@ -9,7 +9,7 @@ const socket = io(BACKEND, {
   transports: ['websocket']
 });
 
-// Получаем ID комнаты из URL
+// 1. Получаем ID комнаты
 const params = new URLSearchParams(window.location.search);
 const roomId = params.get('roomId');
 if (!roomId) {
@@ -17,7 +17,7 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-// Элементы страницы
+// 2. Ссылки на элементы DOM
 const playerWrapper = document.getElementById('playerWrapper');
 const backLink      = document.getElementById('backLink');
 const messagesBox   = document.getElementById('messages');
@@ -25,20 +25,20 @@ const membersList   = document.getElementById('membersList');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
-// Переменные синхронизации плеера
+// 3. Переменные для синхронизации плеера
 let player, isSeeking = false, isRemoteAction = false;
 
-// WebRTC голосовой чат
+// 4. Push-to-Talk: WebRTC
 let localStream = null;
 const peers = {};
 
-// Добавляем кнопку Push-to-Talk
+// 4.1. Добавляем кнопку микрофона
 const micBtn = document.createElement('button');
 micBtn.textContent = '🎤';
 micBtn.className = 'mic-btn';
 document.querySelector('.chat-input-wrap').appendChild(micBtn);
 
-// При зажатии — включаем микрофон, при отпускании — выключаем
+// 4.2. Зажали — включаем микрофон, отпустили — выключаем
 micBtn.addEventListener('mousedown', async () => {
   if (!localStream) {
     try {
@@ -49,7 +49,7 @@ micBtn.addEventListener('mousedown', async () => {
       return alert('Нет доступа к микрофону');
     }
   }
-  // Создаём соединения с участниками
+  // создаём PeerConnection для каждого участника
   for (const id of await getPeerIds()) {
     if (!peers[id]) await createPeer(id, true);
   }
@@ -58,13 +58,12 @@ micBtn.addEventListener('mouseup', () => {
   if (localStream) {
     localStream.getTracks().forEach(t => t.stop());
     localStream = null;
-    // закрываем все PeerConnection
     Object.values(peers).forEach(pc => pc.close());
     Object.keys(peers).forEach(id => delete peers[id]);
   }
 });
 
-// Сигналы WebRTC
+// 4.3. Обработка сигналов WebRTC
 socket.on('new_peer', async ({ from }) => {
   if (from === socket.id || !localStream) return;
   await createPeer(from, false);
@@ -79,20 +78,16 @@ socket.on('signal', async ({ from, description, candidate }) => {
       socket.emit('signal', { to: from, description: pc.localDescription });
     }
   }
-  if (candidate) {
-    await pc.addIceCandidate(candidate);
-  }
+  if (candidate) await pc.addIceCandidate(candidate);
 });
 
+// 4.4. Функция создания PeerConnection
 async function createPeer(peerId, isOffer) {
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   });
   peers[peerId] = pc;
-
-  if (localStream) {
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-  }
+  if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   pc.onicecandidate = e => {
     if (e.candidate) {
@@ -116,21 +111,21 @@ async function createPeer(peerId, isOffer) {
     await pc.setLocalDescription(offer);
     socket.emit('signal', { to: peerId, description: pc.localDescription });
   }
-
   return pc;
 }
 
+// 4.5. Сбор списка peer IDs из БД
 async function getPeerIds() {
   const res = await fetch(`${BACKEND}/api/rooms/${roomId}/members`);
   const { data: members } = await res.json();
   return members.map(m => m.user_id).filter(id => id !== socket.id);
 }
 
-// Подключаемся к комнате и запрашиваем состояние плеера
+// 5. Socket.IO: join, sync_state
 socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
-// Обновляем список участников
+// 5.1. Обновляем участников
 socket.on('members', members => {
   membersList.innerHTML = `
     <div class="chat-members-label">Участники (${members.length}):</div>
@@ -138,14 +133,14 @@ socket.on('members', members => {
   `;
 });
 
-// История и новые сообщения
+// 5.2. История и новые сообщения
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 
-// Отправка сообщения
+// 5.3. Отправка текста
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
 function sendMessage() {
@@ -155,15 +150,15 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// Синхронизация плеера
-socket.on('sync_state', ({ position=0, is_paused }) => {
+// 5.4. Синхронизация плеера
+socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
   isRemoteAction = true;
   player.currentTime = position;
   is_paused ? player.pause() : player.play().catch(() => {});
   setTimeout(() => isRemoteAction = false, 200);
 });
-socket.on('player_update', ({ position=0, is_paused }) => {
+socket.on('player_update', ({ position = 0, is_paused }) => {
   if (!player) return;
   isRemoteAction = true;
   isSeeking = true;
@@ -175,43 +170,43 @@ socket.on('player_update', ({ position=0, is_paused }) => {
   }, 200);
 });
 
-// Создаём спиннер для буферизации
+// 6. Спиннер для буфера
 function createSpinner() {
-  const spinner = document.createElement('div');
-  spinner.className = 'buffer-spinner';
-  spinner.innerHTML = `
+  const s = document.createElement('div');
+  s.className = 'buffer-spinner';
+  s.innerHTML = `
     <div class="double-bounce1"></div>
     <div class="double-bounce2"></div>
   `;
-  spinner.style.display = 'none';
-  return spinner;
+  s.style.display = 'none';
+  return s;
 }
 
-// Загрузка данных комнаты и инициализация плеера
+// 7. Инициализация плеера и UI
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
 
-    // Назад к описанию
+    // 7.1. Назад и фильм
     const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `movie.html?id=${movie.id}`;
 
-    // Отрисовка плеера + спиннера
+    // 7.2. Отрисовываем плеер + спиннер
     playerWrapper.innerHTML = '';
-    const wrapper = document.createElement('div');
-    wrapper.style.position = 'relative';
-    wrapper.innerHTML = `
+    const wrap = document.createElement('div');
+    wrap.style.position = 'relative';
+    wrap.innerHTML = `
       <video id="videoPlayer" controls crossorigin="anonymous" playsinline
              style="width:100%;border-radius:14px"></video>
     `;
     const spinner = createSpinner();
-    wrapper.appendChild(spinner);
-    playerWrapper.appendChild(wrapper);
+    wrap.appendChild(spinner);
+    playerWrapper.appendChild(wrap);
 
-    // Бейдж с одним ID комнаты
+    // 7.3. Один бейдж с ID комнаты
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -225,7 +220,7 @@ async function fetchRoom() {
       alert('ID комнаты скопирован');
     };
 
-    // Подключаем HLS.js
+    // 7.4. HLS.js
     const v = document.getElementById('videoPlayer');
     if (Hls.isSupported()) {
       const hls = new Hls({ debug: false });
@@ -243,7 +238,7 @@ async function fetchRoom() {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
-    // События управления плеером
+    // 7.5. Слушаем play/pause/seeking
     v.addEventListener('play', () => {
       if (isSeeking || isRemoteAction) return;
       socket.emit('player_action', {
@@ -273,6 +268,7 @@ async function fetchRoom() {
     });
 
     player = v;
+
   } catch (err) {
     console.error('[ERROR] Ошибка комнаты:', err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
@@ -281,11 +277,11 @@ async function fetchRoom() {
 
 fetchRoom();
 
-// Утилита для добавления сообщений
+// 8. Вспомог: вывод сообщения
 function appendMessage(author, text) {
-  const div = document.createElement('div');
-  div.className = 'chat-message';
-  div.innerHTML = `<strong>${author}:</strong> ${text}`;
-  messagesBox.appendChild(div);
+  const d = document.createElement('div');
+  d.className = 'chat-message';
+  d.innerHTML = `<strong>${author}:</strong> ${text}`;
+  messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
