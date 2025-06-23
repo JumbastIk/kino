@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
+  // Рисуем обложку, описание и плеер
   const container = document.getElementById('detailContainer');
   container.innerHTML = `
     <img src="${movie.poster}"
@@ -35,25 +36,26 @@ document.addEventListener('DOMContentLoaded', () => {
       <p>${movie.desc}</p>
     </div>
     <div id="playerWrapper">
-      <video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline></video>
-      <button id="playBtn" class="play-btn">▶ Воспроизвести</button>
+      <video
+        id="videoPlayer"
+        class="video-player"
+        controls
+        crossorigin="anonymous"
+        playsinline
+        style="width:100%; max-width:800px;"
+      ></video>
     </div>
-    <div id="roomBtnContainer"></div>
-    <div id="newRoomLink"></div>
+    <div id="roomBtnContainer" style="margin-top:16px;"></div>
+    <div id="newRoomLink" style="margin-top:8px;"></div>
   `;
 
-  document.getElementById('backLink').href = 'index.html';
+  // "Назад" возвращает на список
+  const backLink = document.getElementById('backLink');
+  if (backLink) backLink.href = 'index.html';
 
-  const video    = document.getElementById('videoPlayer');
-  const playBtn  = document.getElementById('playBtn');
+  const video = document.getElementById('videoPlayer');
 
-  playBtn.addEventListener('click', () => {
-    video.play()
-      .then(() => playBtn.style.display = 'none')
-      .catch(err => console.warn('[HLS] play() заблокирован:', err.message));
-  });
-
-  // Всегда используем HLS.js, без нативного fallback
+  // Подключаем HLS.js (никаких нативных fallback)
   if (Hls.isSupported()) {
     const hls = new Hls({ debug: false });
     hls.loadSource(movie.videoUrl);
@@ -67,20 +69,20 @@ document.addEventListener('DOMContentLoaded', () => {
       );
     });
   } else {
-    // Если Hls.js не поддерживается, показываем сообщение
     document.getElementById('playerWrapper').innerHTML =
       '<p class="error">Ваш браузер не поддерживает HLS.</p>';
   }
 
-  // Комната
+  // — Создание комнаты —
   const btnWrap       = document.getElementById('roomBtnContainer');
   const linkContainer = document.getElementById('newRoomLink');
-  const btn           = document.createElement('button');
 
+  const btn = document.createElement('button');
   btn.id          = 'createRoomBtn';
   btn.type        = 'button';
   btn.className   = 'create-room-btn';
   btn.textContent = 'Создать комнату';
+  btn.style.marginRight = '8px';
   btnWrap.appendChild(btn);
 
   btn.addEventListener('click', async e => {
