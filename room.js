@@ -1,4 +1,15 @@
-const socket = io();
+// room.js
+
+// Определяем URL бэкенда
+const BACKEND = window.location.hostname.includes('localhost')
+  ? 'http://localhost:3000'
+  : 'https://kino-fhwp.onrender.com';
+
+// Инициализируем Socket.IO сразу на нужном хосте
+const socket = io(BACKEND, {
+  transports: ['websocket'],
+  path: '/socket.io'
+});
 
 const params = new URLSearchParams(window.location.search);
 const roomId = params.get('roomId');
@@ -13,29 +24,29 @@ const user = {
   first_name: 'Гость'
 };
 
-const API_BASE = window.location.origin.includes('localhost')
-  ? 'http://localhost:3000'
-  : window.location.origin;
-
 const playerWrapper = document.getElementById('playerWrapper');
-const backLink = document.getElementById('backLink');
-const msgInput = document.getElementById('msgInput');
-const sendBtn = document.getElementById('sendBtn');
-const messagesBox = document.getElementById('messages');
-const membersList = document.getElementById('membersList');
+const backLink      = document.getElementById('backLink');
+const msgInput      = document.getElementById('msgInput');
+const sendBtn       = document.getElementById('sendBtn');
+const messagesBox   = document.getElementById('messages');
+const membersList   = document.getElementById('membersList');
 
 let player;
 let isSeeking = false;
 
-socket.emit('join', { roomId, userData: user });
+// Сообщаем серверу, кто и в какую комнату заходит
+socket.emit('join',          { roomId, userData: user });
 socket.emit('request_state', { roomId });
 
 async function fetchRoom() {
   try {
-    const res = await fetch(`${API_BASE}/api/rooms/${roomId}`);
+    // Забираем данные комнаты с правильного домена
+    const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
     if (!roomData) throw new Error('Комната не найдена');
 
+    // Находим фильм в списке (movies должен быть подключён ранее)
     const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
 
@@ -46,62 +57,57 @@ async function fetchRoom() {
       <button id="playBtn" style="margin-top:10px;">▶ Воспроизвести</button>
     `;
 
-    const video = document.getElementById('videoPlayer');
+    const video   = document.getElementById('videoPlayer');
     const playBtn = document.getElementById('playBtn');
 
     playBtn.addEventListener('click', () => {
-      video.play().then(() => {
-        playBtn.style.display = 'none';
-      }).catch(err => {
-        console.warn('[HLS] play() заблокирован:', err.message);
-      });
+      video.play()
+        .then(() => playBtn.style.display = 'none')
+        .catch(err => console.warn('[HLS] play() заблокирован:', err.message));
     });
 
+    // Подключаем HLS.js без лишних логов
     if (Hls.isSupported()) {
-      const hls = new Hls({
-        xhrSetup: function (xhr, url) {
-          xhr.withCredentials = false;
-          xhr.onload = () => console.log('[HLS] Загружен сегмент:', url);
-          xhr.onerror = () => {
-            console.error('[HLS] ❌ Ошибка сегмента:', url);
-            alert(
-              'Ошибка загрузки видео.\n\nПроверь настройки BunnyCDN.\nРазреши домен: ' + window.location.origin
-            );
-          };
-        }
-      });
+      const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(video);
+      hls.on(Hls.Events.ERROR, (event, data) => {
+        console.error('[HLS] Ошибка:', data);
+        alert(
+          'Ошибка загрузки видео.\n\n' +
+          'Проверь настройки CDN и CORS.\n' +
+          'Разреши домен: ' + window.location.origin
+        );
+      });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
     } else {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
+    // Синхронизация плеера
     video.addEventListener('play', () => {
       if (!isSeeking) socket.emit('player_action', {
         roomId,
-        position: video.currentTime,
+        position:  video.currentTime,
         is_paused: false
       });
     });
-
     video.addEventListener('pause', () => {
       if (!isSeeking) socket.emit('player_action', {
         roomId,
-        position: video.currentTime,
+        position:  video.currentTime,
         is_paused: true
       });
     });
-
     video.addEventListener('seeking', () => { isSeeking = true; });
-    video.addEventListener('seeked', () => {
+    video.addEventListener('seeked',  () => {
       socket.emit('player_action', {
         roomId,
-        position: video.currentTime,
+        position:  video.currentTime,
         is_paused: video.paused
       });
-      setTimeout(() => (isSeeking = false), 200);
+      setTimeout(() => isSeeking = false, 200);
     });
 
     player = video;
@@ -110,8 +116,10 @@ async function fetchRoom() {
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
+
 fetchRoom();
 
+// --- Чат и история сообщений ---
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
@@ -124,37 +132,49 @@ msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
 function sendMessage() {
   const text = msgInput.value.trim();
   if (!text) return;
-  socket.emit('chat_message', { roomId, author: user.first_name, text });
+  socket.emit('chat_message', {
+    roomId,
+    author: user.first_name,
+    text
+  });
   msgInput.value = '';
 }
 
+// Синхронизация состояния плеера от других клиентов
 socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
   player.currentTime = position;
   is_paused
     ? player.pause()
-    : player.play().catch(err => {
-        console.warn('[HLS] Автозапуск заблокирован:', err.message);
-      });
+    : player.play().catch(err =>
+        console.warn('[HLS] Автозапуск заблокирован:', err.message)
+      );
 });
 
+// Обновления плеера в реальном времени
 socket.on('player_update', ({ position = 0, is_paused }) => {
   if (!player) return;
   isSeeking = true;
   player.currentTime = position;
   is_paused
     ? player.pause()
-    : player.play().catch(err => {
-        console.warn('[HLS] Автозапуск заблокирован:', err.message);
-      });
-  setTimeout(() => (isSeeking = false), 200);
+    : player.play().catch(err =>
+        console.warn('[HLS] Автозапуск заблокирован:', err.message)
+      );
+  setTimeout(() => isSeeking = false, 200);
 });
 
+// Список участников
 socket.on('members', members => {
-  membersList.innerHTML = `<div class="chat-members-label">Участники:</div>
-    <ul>${members.map(id => `<li>${id}</li>`).join('')}</ul>`;
+  membersList.innerHTML = `
+    <div class="chat-members-label">Участники:</div>
+    <ul>
+      ${members.map(m => `<li>${m.user_name || m.user_id}</li>`).join('')}
+    </ul>
+  `;
 });
 
+// Вспомогательная функция для чата
 function appendMessage(author, text) {
   const div = document.createElement('div');
   div.className = 'chat-message';

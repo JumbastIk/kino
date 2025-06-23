@@ -1,23 +1,28 @@
-const API_BASE = window.location.origin.includes('localhost')
+// script.js
+
+// Устанавливаем базовый URL API
+const API_BASE = window.location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
-
 const API_URL = `${API_BASE}/api/rooms`;
-// Подключение socket с передачей origin, без Referer
+
+// Инициализируем Socket.IO на внешнем бэкенде
 const socket = io(API_BASE, {
-  transports: ['websocket'],
-  transportOptions: {
-    polling: {
-      extraHeaders: {
-        Referer: ''
-      }
-    }
-  }
+  path: '/socket.io',
+  transports: ['websocket']
 });
 
+socket.on('connect_error', err => {
+  console.error('Socket.IO connect error:', err);
+});
+socket.on('connect', () => {
+  console.log('Socket.IO connected, id =', socket.id);
+});
+
+// Отрисовка карточки фильма
 function createMovieCard(movie) {
   const link = document.createElement('a');
-  link.href = `movie.html?id=${encodeURIComponent(movie.id)}`;
+  link.href      = `movie.html?id=${encodeURIComponent(movie.id)}`;
   link.className = 'movie-link';
   link.style.textDecoration = 'none';
 
@@ -32,6 +37,7 @@ function createMovieCard(movie) {
   return link;
 }
 
+// Слайдер главных фильмов
 function renderMainSlider() {
   const main = document.getElementById('mainSlider');
   if (!main) return;
@@ -42,23 +48,24 @@ function renderMainSlider() {
     .filter(Boolean);
 
   main.innerHTML = '';
-  main.style.display = 'flex';
-  main.style.overflowX = 'auto';
+  main.style.display    = 'flex';
+  main.style.overflowX  = 'auto';
 
   movies
     .filter(m => ids.includes(m.id))
     .forEach(m => main.appendChild(createMovieCard(m)));
 }
 
+// Слайдеры по категориям
 function renderCategories() {
   document.querySelectorAll('.category').forEach(sec => {
-    const genre = sec.dataset.categoryId;
+    const genre  = sec.dataset.categoryId;
     const slider = sec.querySelector('.slider');
     if (!genre || !slider) return;
 
-    slider.innerHTML = '';
-    slider.style.display = 'flex';
-    slider.style.overflowX = 'auto';
+    slider.innerHTML        = '';
+    slider.style.display    = 'flex';
+    slider.style.overflowX  = 'auto';
 
     movies
       .filter(m => m.category === genre)
@@ -66,6 +73,7 @@ function renderCategories() {
   });
 }
 
+// Кнопки прокрутки слайдеров
 function initSliderControls() {
   document.querySelectorAll('.slider-wrapper').forEach(wrap => {
     const slider = wrap.querySelector('.slider');
@@ -74,17 +82,25 @@ function initSliderControls() {
     if (!slider || !prev || !next) return;
 
     const step = slider.offsetWidth * 0.8;
-    prev.addEventListener('click', () => slider.scrollBy({ left: -step, behavior: 'smooth' }));
-    next.addEventListener('click', () => slider.scrollBy({ left:  step, behavior: 'smooth' }));
+    prev.addEventListener('click', () =>
+      slider.scrollBy({ left: -step, behavior: 'smooth' })
+    );
+    next.addEventListener('click', () =>
+      slider.scrollBy({ left:  step, behavior: 'smooth' })
+    );
   });
 }
 
+// Загрузка списка комнат
 async function loadRooms() {
   const res = await fetch(API_URL);
-  if (!res.ok) throw new Error(`Ошибка ${res.status} при загрузке комнат`);
+  if (!res.ok) {
+    throw new Error(`Ошибка ${res.status} при загрузке комнат`);
+  }
   return await res.json();
 }
 
+// Добавление одной комнаты в слайдер
 function addRoomToSlider(room, highlight = false) {
   const slider = document.getElementById('roomsSlider');
   if (!slider) return;
@@ -106,12 +122,18 @@ function addRoomToSlider(room, highlight = false) {
         <div class="room-title">${room.title}</div>
         <div class="room-viewers">${room.viewers || 1} смотрят</div>
       </div>
-      <div class="room-timer">${room.created_at ? new Date(room.created_at).toLocaleTimeString() : ''}</div>
+      <div class="room-timer">
+        ${room.created_at
+          ? new Date(room.created_at).toLocaleTimeString()
+          : ''
+        }
+      </div>
     </a>
   `;
   slider.insertBefore(slide, slider.firstChild);
 }
 
+// Отрисовка всех комнат
 async function renderRooms(activeRoomId = null) {
   const slider = document.getElementById('roomsSlider');
   if (!slider) return;
@@ -120,7 +142,11 @@ async function renderRooms(activeRoomId = null) {
   try {
     rooms = await loadRooms();
   } catch (err) {
-    slider.innerHTML = `<div style="color:red;padding:16px;">${err.message}</div>`;
+    slider.innerHTML = `
+      <div style="color:red; padding:16px;">
+        ${err.message}
+      </div>
+    `;
     return;
   }
 
@@ -128,21 +154,22 @@ async function renderRooms(activeRoomId = null) {
   rooms.forEach(r => addRoomToSlider(r, activeRoomId === r.id));
 }
 
+// Создание новой комнаты
 async function createRoom(title) {
   if (!title) return;
 
   const btn = document.querySelector('button[onclick^="window.createRoom"]');
   if (btn) {
-    btn.disabled   = true;
+    btn.disabled    = true;
     btn.textContent = 'Создание...';
   }
 
   let newRoomId = null;
   try {
     const res = await fetch(API_URL, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title })
+      body:    JSON.stringify({ title })
     });
     const data = await res.json();
     if (!res.ok || !data.id) {
@@ -158,13 +185,19 @@ async function createRoom(title) {
     }
   }
 
-  if (newRoomId) renderRooms(newRoomId);
+  if (newRoomId) {
+    renderRooms(newRoomId);
+    // уведомим всех через WebSocket
+    socket.emit('new_room', { room: { id: newRoomId, title, viewers: 1, created_at: new Date() } });
+  }
 }
 
+// Обработка оповещения о создании комнаты от сервера
 socket.on('room_created', room => {
   addRoomToSlider(room, true);
 });
 
+// Инициализация после загрузки DOM
 document.addEventListener('DOMContentLoaded', () => {
   renderMainSlider();
   renderCategories();
