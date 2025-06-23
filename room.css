@@ -1,4 +1,4 @@
-/* общий сброс */
+/* ===== Общий сброс ===== */
 html, body {
   margin: 0;
   padding: 0;
@@ -8,7 +8,7 @@ html, body {
   height: auto;
 }
 
-/* фиксированная шапка */
+/* ===== Фиксированная шапка ===== */
 .back-link {
   position: fixed;
   top: env(safe-area-inset-top, 10px);
@@ -22,7 +22,7 @@ html, body {
   text-decoration: underline;
 }
 
-/* контейнер всего экрана с учётом отступа под шапку */
+/* ===== Контейнер ===== */
 .room-container {
   padding-top: 44px;
   display: flex;
@@ -32,7 +32,7 @@ html, body {
   gap: 16px;
 }
 
-/* ===== СТИЛЬНЫЙ ПЛЕЕР ===== */
+/* ===== Стильный плеер ===== */
 .player-wrapper {
   position: relative;
   background: #181818;
@@ -53,22 +53,26 @@ html, body {
   background: #000;
 }
 
-/* бейдж ID комнаты */
+/* ===== Бейдж с ID комнаты ===== */
 .room-id-badge {
   margin-top: 8px;
   text-align: center;
   font-size: 14px;
   color: #ccc;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.room-id-badge small {
+  color: #aaa;
 }
 .room-id-badge code {
   background: #2a2a2a;
   padding: 2px 6px;
   border-radius: 4px;
   font-family: monospace;
-  margin: 0 4px;
 }
 .room-id-badge button {
-  margin-left: 8px;
   padding: 4px 8px;
   background: #ff5722;
   border: none;
@@ -82,7 +86,7 @@ html, body {
   background: #e64a19;
 }
 
-/* спиннер буферизации */
+/* ===== Индикатор буферизации ===== */
 .buffer-spinner {
   width: 60px;
   height: 60px;
@@ -93,7 +97,8 @@ html, body {
 }
 .buffer-spinner .double-bounce1,
 .buffer-spinner .double-bounce2 {
-  width: 100%; height: 100%;
+  width: 100%;
+  height: 100%;
   border-radius: 50%;
   background-color: rgba(255,255,255,0.6);
   position: absolute;
@@ -108,7 +113,7 @@ html, body {
   50%     { transform: scale(1); }
 }
 
-/* список участников */
+/* ===== Список участников ===== */
 .chat-members {
   width: 90%;
   max-width: 420px;
@@ -124,7 +129,7 @@ html, body {
   margin-bottom: 4px;
 }
 
-/* чат */
+/* ===== Чат ===== */
 .chat-container {
   display: flex;
   flex-direction: column;
@@ -148,12 +153,14 @@ html, body {
   margin: 4px 0;
 }
 
-/* поле ввода «приклеено» к низу и всегда видно */
+/* ===== Поле ввода и кнопки ===== */
 .chat-input-wrap {
   position: sticky;
   bottom: env(safe-area-inset-bottom, 0);
   background: #1e1e1e;
   display: flex;
+  align-items: center;
+  gap: 0.5rem;
   border-top: 1px solid #ff5722;
   padding: 8px;
   z-index: 50;
@@ -169,7 +176,8 @@ html, body {
   outline: none;
 }
 .chat-input-wrap button {
-  padding: 12px 20px;
+  flex: 0 0 auto;
+  padding: 12px 16px;
   border: none;
   border-radius: 0 4px 4px 0;
   background: #ff5722;
@@ -180,8 +188,16 @@ html, body {
 .chat-input-wrap button:hover {
   background: #e64a19;
 }
+.mic-btn {
+  background: #444;
+  color: #fff;
+  border-radius: 4px;
+}
+.mic-btn:hover {
+  background: #555;
+}
 
-/* адаптивность */
+/* ===== Адаптивность ===== */
 @media (max-width: 700px) {
   .player-wrapper,
   .chat-members,
