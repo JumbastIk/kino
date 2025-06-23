@@ -34,11 +34,45 @@ document.addEventListener('DOMContentLoaded', () => {
       <h1>${movie.title}</h1>
       <p>${movie.desc}</p>
     </div>
+    <div id="playerWrapper">
+      <video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline></video>
+      <button id="playBtn" class="play-btn">▶ Воспроизвести</button>
+    </div>
+    <div id="roomBtnContainer"></div>
+    <div id="newRoomLink"></div>
   `;
 
-  const backLink = document.getElementById('backLink');
-  if (backLink) backLink.href = 'index.html';
+  document.getElementById('backLink').href = 'index.html';
 
+  const video    = document.getElementById('videoPlayer');
+  const playBtn  = document.getElementById('playBtn');
+
+  playBtn.addEventListener('click', () => {
+    video.play()
+      .then(() => playBtn.style.display = 'none')
+      .catch(err => console.warn('[HLS] play() заблокирован:', err.message));
+  });
+
+  // Всегда используем HLS.js, без нативного fallback
+  if (Hls.isSupported()) {
+    const hls = new Hls({ debug: false });
+    hls.loadSource(movie.videoUrl);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      console.error('[HLS] Ошибка:', data);
+      alert(
+        'Ошибка загрузки видео.\n' +
+        'Проверьте настройки CDN и CORS для домена:\n' +
+        window.location.origin
+      );
+    });
+  } else {
+    // Если Hls.js не поддерживается, показываем сообщение
+    document.getElementById('playerWrapper').innerHTML =
+      '<p class="error">Ваш браузер не поддерживает HLS.</p>';
+  }
+
+  // Комната
   const btnWrap       = document.getElementById('roomBtnContainer');
   const linkContainer = document.getElementById('newRoomLink');
   const btn           = document.createElement('button');
@@ -66,7 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       const { id } = await res.json();
       if (!id) throw new Error('Не вернулся ID комнаты');
 

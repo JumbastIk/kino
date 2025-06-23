@@ -37,20 +37,11 @@ socket.emit('request_state', { roomId });
 socket.on('members', members => {
   if (!Array.isArray(members)) return;
   const count = members.length;
-  const items = members.map(m => `<li>${m.user_name || m.user_id}</li>`).join('');
+  const items = members.map(m => `<li>${m.user_id}</li>`).join('');
   membersList.innerHTML = `
     <div class="chat-members-label">Участники (${count}):</div>
     <ul>${items}</ul>
   `;
-});
-
-// Optional: если хотите пересинхронизировать число зрителей в комнате
-socket.on('room_updated', ({ id, viewers }) => {
-  if (id !== roomId) return;
-  const label = membersList.querySelector('.chat-members-label');
-  if (label) {
-    label.textContent = `Участники (${viewers}):`;
-  }
 });
 
 socket.on('history', data => {
@@ -125,27 +116,26 @@ async function fetchRoom() {
         console.error('[HLS] Ошибка:', data);
         alert(
           'Ошибка загрузки видео.\n\n' +
-          'Проверь настройки CDN и CORS.\n' +
-          'Разреши домен: ' + window.location.origin
+          'Проверьте настройки CDN и CORS для домена:\n' +
+          window.location.origin
         );
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = movie.videoUrl;
     } else {
-      throw new Error('Ваш браузер не поддерживает HLS');
+      playerWrapper.innerHTML = '<p class="error">Ваш браузер не поддерживает HLS.</p>';
+      return;
     }
 
     video.addEventListener('play', () => {
       if (!isSeeking) socket.emit('player_action', {
         roomId,
-        position: video.currentTime,
+        position:  video.currentTime,
         is_paused: false
       });
     });
     video.addEventListener('pause', () => {
       if (!isSeeking) socket.emit('player_action', {
         roomId,
-        position: video.currentTime,
+        position:  video.currentTime,
         is_paused: true
       });
     });
@@ -153,7 +143,7 @@ async function fetchRoom() {
     video.addEventListener('seeked', () => {
       socket.emit('player_action', {
         roomId,
-        position: video.currentTime,
+        position:  video.currentTime,
         is_paused: video.paused
       });
       setTimeout(() => isSeeking = false, 200);

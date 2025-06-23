@@ -11,11 +11,9 @@ const socket = io(API_BASE, {
 });
 
 socket.on('connect_error', err => console.error('Socket.IO connect error:', err));
-socket.on('connect', () => console.log('Socket.IO connected, id =', socket.id));
+socket.on('connect', () => console.log('Socket.IO connected:', socket.id));
 
 socket.on('room_created', room => addRoomToSlider(room, true));
-
-// live-update viewers count
 socket.on('room_updated', ({ id, viewers }) => {
   const slide = document.querySelector(`.slide[data-room-id="${id}"]`);
   if (!slide) return;
@@ -45,6 +43,7 @@ function renderMainSlider() {
   if (!main) return;
   const ids = (main.dataset.movieIds || '')
     .split(',').map(x => x.trim()).filter(Boolean);
+
   main.innerHTML = '';
   main.style.display = 'flex';
   main.style.overflowX = 'auto';
@@ -68,8 +67,8 @@ function renderCategories() {
 function initSliderControls() {
   document.querySelectorAll('.slider-wrapper').forEach(wrap => {
     const slider = wrap.querySelector('.slider');
-    const prev   = wrap.querySelector('.slider-btn.prev');
-    const next   = wrap.querySelector('.slider-btn.next');
+    const prev = wrap.querySelector('.slider-btn.prev');
+    const next = wrap.querySelector('.slider-btn.next');
     if (!slider || !prev || !next) return;
     const step = slider.offsetWidth * 0.8;
     prev.addEventListener('click', () =>
@@ -84,7 +83,7 @@ function initSliderControls() {
 async function loadRooms() {
   const res = await fetch(API_URL);
   if (!res.ok) throw new Error(`Ошибка ${res.status} при загрузке комнат`);
-  return res.json();
+  return await res.json();
 }
 
 function addRoomToSlider(room, highlight = false) {
@@ -98,19 +97,13 @@ function addRoomToSlider(room, highlight = false) {
     slide.style.background = '#222';
   }
   slide.innerHTML = `
-    <a href="room.html?roomId=${encodeURIComponent(room.id)}"
-       class="room-link" style="text-decoration:none;color:inherit;">
+    <a href="room.html?roomId=${encodeURIComponent(room.id)}" class="room-link" style="text-decoration:none;color:inherit;">
       <div class="room-icon">🎥</div>
       <div class="room-info">
         <div class="room-title">${room.title}</div>
         <div class="room-viewers">${room.viewers} смотрят</div>
       </div>
-      <div class="room-timer">
-        ${room.created_at
-          ? new Date(room.created_at).toLocaleTimeString()
-          : ''
-        }
-      </div>
+      <div class="room-timer">${room.created_at ? new Date(room.created_at).toLocaleTimeString() : ''}</div>
     </a>
   `;
   slider.insertBefore(slide, slider.firstChild);
