@@ -137,12 +137,12 @@ socket.on('history', data => {
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 
-// ============ [ВСТАВКА] ============
-// 5.2.1. Сообщение о входе нового участника
-socket.on('user_joined', ({ user }) => {
-  appendSystemMessage(`${user} вошёл в комнату`);
+// 5.2.1. Сообщения о входе/выходе
+socket.on('system_message', msg => {
+  if (msg && msg.text) {
+    appendSystemMessage(msg.text);
+  }
 });
-// ============ [КОНЕЦ ВСТАВКИ] ============
 
 // 5.3. Отправка текста
 sendBtn.addEventListener('click', sendMessage);
