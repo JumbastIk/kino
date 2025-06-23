@@ -157,9 +157,9 @@ io.on('connection', socket => {
         .eq('room_id', roomId);
       io.to(roomId).emit('members', members);
 
-      // Системное сообщение
+      // Сообщение "Человек вошёл в комнату"
       io.to(roomId).emit('system_message', {
-        text:       `Пользователь ${userId} вошёл в комнату`,
+        text:       `Человек вошёл в комнату`,
         created_at: new Date().toISOString()
       });
 
@@ -236,9 +236,9 @@ io.on('connection', socket => {
         .eq('room_id', currentRoom);
       io.to(currentRoom).emit('members', members);
 
-      // Системное сообщение
+      // Сообщение "Человек вышел из комнаты"
       io.to(currentRoom).emit('system_message', {
-        text:       `Пользователь ${userId} вышел из комнаты`,
+        text:       `Человек вышел из комнаты`,
         created_at: new Date().toISOString()
       });
     } catch (err) {

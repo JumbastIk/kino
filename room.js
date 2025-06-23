@@ -1,5 +1,3 @@
-// room.js
-
 const BACKEND = window.location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
@@ -127,10 +125,9 @@ socket.emit('request_state', { roomId });
 
 // 5.1. Обновляем участников
 socket.on('members', members => {
-  membersList.innerHTML = `
-    <div class="chat-members-label">Участники (${members.length}):</div>
-    <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>
-  `;
+  membersList.innerHTML =
+    `<div class="chat-members-label">Участники (${members.length}):</div>
+    <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
 });
 
 // 5.2. История и новые сообщения
@@ -139,6 +136,13 @@ socket.on('history', data => {
   data.forEach(m => appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
+
+// ============ [ВСТАВКА] ============
+// 5.2.1. Сообщение о входе нового участника
+socket.on('user_joined', ({ user }) => {
+  appendSystemMessage(`${user} вошёл в комнату`);
+});
+// ============ [КОНЕЦ ВСТАВКИ] ============
 
 // 5.3. Отправка текста
 sendBtn.addEventListener('click', sendMessage);
@@ -174,10 +178,9 @@ socket.on('player_update', ({ position = 0, is_paused }) => {
 function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
-  s.innerHTML = `
-    <div class="double-bounce1"></div>
-    <div class="double-bounce2"></div>
-  `;
+  s.innerHTML =
+    `<div class="double-bounce1"></div>
+    <div class="double-bounce2"></div>`;
   s.style.display = 'none';
   return s;
 }
@@ -192,16 +195,15 @@ async function fetchRoom() {
     // 7.1. Назад и фильм
     const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
-    backLink.href = `movie.html?id=${movie.id}`;
+    backLink.href = `${movie.html}?id=${movie.id}`;
 
     // 7.2. Отрисовываем плеер + спиннер
     playerWrapper.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.style.position = 'relative';
-    wrap.innerHTML = `
-      <video id="videoPlayer" controls crossorigin="anonymous" playsinline
-             style="width:100%;border-radius:14px"></video>
-    `;
+    wrap.innerHTML =
+      `<video id="videoPlayer" controls crossorigin="anonymous" playsinline
+             style="width:100%;border-radius:14px"></video>`;
     const spinner = createSpinner();
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
@@ -209,11 +211,10 @@ async function fetchRoom() {
     // 7.3. Один бейдж с ID комнаты
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
-    badge.innerHTML = `
-      <small>ID комнаты:</small>
+    badge.innerHTML =
+      `<small>ID комнаты:</small>
       <code>${roomId}</code>
-      <button id="copyRoomId">Копировать</button>
-    `;
+      <button id="copyRoomId">Копировать</button>`;
     playerWrapper.after(badge);
     document.getElementById('copyRoomId').onclick = () => {
       navigator.clipboard.writeText(roomId);
@@ -277,11 +278,20 @@ async function fetchRoom() {
 
 fetchRoom();
 
-// 8. Вспомог: вывод сообщения
+// 8. Вспомог: вывод обычного сообщения
 function appendMessage(author, text) {
   const d = document.createElement('div');
   d.className = 'chat-message';
   d.innerHTML = `<strong>${author}:</strong> ${text}`;
+  messagesBox.appendChild(d);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+}
+
+// 9. Вспомог: вывод системного сообщения
+function appendSystemMessage(text) {
+  const d = document.createElement('div');
+  d.className = 'chat-message system-message'; // Добавь стили в CSS если нужно
+  d.innerHTML = `<em>${text}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
