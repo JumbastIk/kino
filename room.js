@@ -9,7 +9,7 @@ const socket = io(BACKEND, {
   transports: ['websocket']
 });
 
-// Из URL
+// Получаем ID комнаты из URL
 const params = new URLSearchParams(window.location.search);
 const roomId = params.get('roomId');
 if (!roomId) {
@@ -17,238 +17,275 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-// элементы
+// Элементы страницы
 const playerWrapper = document.getElementById('playerWrapper');
 const backLink      = document.getElementById('backLink');
-const msgInput      = document.getElementById('msgInput');
-const sendBtn       = document.getElementById('sendBtn');
 const messagesBox   = document.getElementById('messages');
 const membersList   = document.getElementById('membersList');
-const overlay       = document.querySelector('.chat-overlay');
-const chatContainer = document.querySelector('.chat-container');
+const msgInput      = document.getElementById('msgInput');
+const sendBtn       = document.getElementById('sendBtn');
 
-let player, isSeeking=false, isRemoteAction=false;
+// Переменные синхронизации плеера
+let player, isSeeking = false, isRemoteAction = false;
 
-// WebRTC-чат...
-let localStream=null;
-const peers={};
+// WebRTC голосовой чат
+let localStream = null;
+const peers = {};
 
-// добавляем кнопку микрофона
+// Добавляем кнопку Push-to-Talk
 const micBtn = document.createElement('button');
 micBtn.textContent = '🎤';
 micBtn.className = 'mic-btn';
 document.querySelector('.chat-input-wrap').appendChild(micBtn);
 
-// Push-to-Talk
-micBtn.addEventListener('mousedown', async ()=>{
+// При зажатии — включаем микрофон, при отпускании — выключаем
+micBtn.addEventListener('mousedown', async () => {
   if (!localStream) {
     try {
-      localStream = await navigator.mediaDevices.getUserMedia({audio:true});
-      // оповестим других
-      socket.emit('new_peer',{roomId,from:socket.id});
-    } catch(e){
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      socket.emit('new_peer', { roomId, from: socket.id });
+    } catch (e) {
       console.error(e);
       return alert('Нет доступа к микрофону');
     }
   }
-  // генерим offer
-  Object.keys(peers).forEach(id=>peers[id].close());
-  for(const peerId of await registerPeers()) {/*...*/}
+  // Создаём соединения с участниками
+  for (const id of await getPeerIds()) {
+    if (!peers[id]) await createPeer(id, true);
+  }
 });
-micBtn.addEventListener('mouseup', ()=>{
-  if(localStream){
-    localStream.getTracks().forEach(t=>t.stop());
-    localStream=null;
+micBtn.addEventListener('mouseup', () => {
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+    // закрываем все PeerConnection
+    Object.values(peers).forEach(pc => pc.close());
+    Object.keys(peers).forEach(id => delete peers[id]);
   }
 });
 
-// Signal
-socket.on('new_peer',async({from})=>{
-  if (from===socket.id || !localStream) return;
-  await makePeer(from,true);
+// Сигналы WebRTC
+socket.on('new_peer', async ({ from }) => {
+  if (from === socket.id || !localStream) return;
+  await createPeer(from, false);
 });
-socket.on('signal',async({from,description,candidate})=>{
-  let pc=peers[from]||await makePeer(from,false);
-  if(description){
+socket.on('signal', async ({ from, description, candidate }) => {
+  let pc = peers[from] || await createPeer(from, false);
+  if (description) {
     await pc.setRemoteDescription(description);
-    if(description.type==='offer'){
-      const ans=await pc.createAnswer();
-      await pc.setLocalDescription(ans);
-      socket.emit('signal',{to:from,description:pc.localDescription});
+    if (description.type === 'offer') {
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('signal', { to: from, description: pc.localDescription });
     }
   }
-  if(candidate) await pc.addIceCandidate(candidate);
+  if (candidate) {
+    await pc.addIceCandidate(candidate);
+  }
 });
-async function makePeer(peerId,isOffer){
-  const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-  peers[peerId]=pc;
-  if(localStream) localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
-  pc.onicecandidate=e=>e.candidate&&socket.emit('signal',{to:peerId,candidate:e.candidate});
-  pc.ontrack=e=>{
-    let audio=document.getElementById(`audio_${peerId}`);
-    if(!audio){
-      audio=document.createElement('audio');
-      audio.id=`audio_${peerId}`;
-      audio.autoplay=true;
+
+async function createPeer(peerId, isOffer) {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+  peers[peerId] = pc;
+
+  if (localStream) {
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  }
+
+  pc.onicecandidate = e => {
+    if (e.candidate) {
+      socket.emit('signal', { to: peerId, candidate: e.candidate });
+    }
+  };
+
+  pc.ontrack = e => {
+    let audio = document.getElementById(`audio_${peerId}`);
+    if (!audio) {
+      audio = document.createElement('audio');
+      audio.id = `audio_${peerId}`;
+      audio.autoplay = true;
       document.body.appendChild(audio);
     }
-    audio.srcObject=e.streams[0];
+    audio.srcObject = e.streams[0];
   };
-  if(isOffer){
-    const offer=await pc.createOffer();
+
+  if (isOffer) {
+    const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    socket.emit('signal',{to:peerId,description:pc.localDescription});
+    socket.emit('signal', { to: peerId, description: pc.localDescription });
   }
+
   return pc;
 }
-async function registerPeers(){
-  const {data:members} = await fetch(`${BACKEND}/api/rooms/${roomId}/members`).then(r=>r.json());
-  return members.map(m=>m.user_id).filter(id=>id!==socket.id);
+
+async function getPeerIds() {
+  const res = await fetch(`${BACKEND}/api/rooms/${roomId}/members`);
+  const { data: members } = await res.json();
+  return members.map(m => m.user_id).filter(id => id !== socket.id);
 }
 
-// Socket.IO: join + чат + плеер
-socket.emit('join',{roomId,userData:{id:socket.id,first_name:'Гость'}});
-socket.emit('request_state',{roomId});
+// Подключаемся к комнате и запрашиваем состояние плеера
+socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
+socket.emit('request_state', { roomId });
 
-// список участников
-socket.on('members',members=>{
-  const cnt=members.length;
-  membersList.innerHTML=`
-    <div class="chat-members-label">Участники (${cnt}):</div>
-    <ul>${members.map(m=>`<li>${m.user_id}</li>`).join('')}</ul>
+// Обновляем список участников
+socket.on('members', members => {
+  membersList.innerHTML = `
+    <div class="chat-members-label">Участники (${members.length}):</div>
+    <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>
   `;
 });
 
-// chat history
-socket.on('history',data=>{
-  messagesBox.innerHTML='';
-  data.forEach(m=>appendMessage(m.author,m.text));
+// История и новые сообщения
+socket.on('history', data => {
+  messagesBox.innerHTML = '';
+  data.forEach(m => appendMessage(m.author, m.text));
 });
-socket.on('chat_message',m=>appendMessage(m.author,m.text));
+socket.on('chat_message', m => appendMessage(m.author, m.text));
 
-sendBtn.addEventListener('click',sendMessage);
-msgInput.addEventListener('keydown',e=>e.key==='Enter'&&sendMessage());
-function sendMessage(){
-  const t=msgInput.value.trim();
-  if(!t)return;
-  socket.emit('chat_message',{roomId,author:'Гость',text:t});
-  msgInput.value='';
+// Отправка сообщения
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
+function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+  socket.emit('chat_message', { roomId, author: 'Гость', text });
+  msgInput.value = '';
 }
 
-// видео-синхронизация
-socket.on('sync_state',({position=0,is_paused})=>{
-  if(!player)return;
-  isRemoteAction=true;
-  player.currentTime=position;
-  is_paused?player.pause():player.play().catch(()=>{});
-  setTimeout(()=>isRemoteAction=false,200);
+// Синхронизация плеера
+socket.on('sync_state', ({ position=0, is_paused }) => {
+  if (!player) return;
+  isRemoteAction = true;
+  player.currentTime = position;
+  is_paused ? player.pause() : player.play().catch(() => {});
+  setTimeout(() => isRemoteAction = false, 200);
 });
-socket.on('player_update',({position=0,is_paused})=>{
-  if(!player)return;
-  isRemoteAction=true;
-  isSeeking=true;
-  player.currentTime=position;
-  is_paused?player.pause():player.play().catch(()=>{});
-  setTimeout(()=>{isSeeking=false;isRemoteAction=false;},200);
+socket.on('player_update', ({ position=0, is_paused }) => {
+  if (!player) return;
+  isRemoteAction = true;
+  isSeeking = true;
+  player.currentTime = position;
+  is_paused ? player.pause() : player.play().catch(() => {});
+  setTimeout(() => {
+    isSeeking = false;
+    isRemoteAction = false;
+  }, 200);
 });
 
-// spinner
-function createSpinner(){
-  const d=document.createElement('div');
-  d.className='buffer-spinner';
-  d.innerHTML='<div class="double-bounce1"></div><div class="double-bounce2"></div>';
-  d.style.display='none';
-  return d;
+// Создаём спиннер для буферизации
+function createSpinner() {
+  const spinner = document.createElement('div');
+  spinner.className = 'buffer-spinner';
+  spinner.innerHTML = `
+    <div class="double-bounce1"></div>
+    <div class="double-bounce2"></div>
+  `;
+  spinner.style.display = 'none';
+  return spinner;
 }
 
-// отрисовка комнаты
-async function fetchRoom(){
-  try{
-    const res=await fetch(`${BACKEND}/api/rooms/${roomId}`);
-    if(!res.ok)throw new Error(res.status);
-    const roomData=await res.json();
+// Загрузка данных комнаты и инициализация плеера
+async function fetchRoom() {
+  try {
+    const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const roomData = await res.json();
 
-    const movie=movies.find(x=>x.id===roomData.movie_id);
-    if(!movie||!movie.videoUrl)throw new Error('Фильм не найден');
+    // Назад к описанию
+    const movie = movies.find(m => m.id === roomData.movie_id);
+    if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
+    backLink.href = `movie.html?id=${movie.id}`;
 
-    // back link
-    backLink.href=`movie.html?id=${movie.id}`;
-
-    // плеер + спиннер
-    playerWrapper.innerHTML='';
-    const wrapper=document.createElement('div');
-    wrapper.className='video-container';
-    wrapper.style.position='relative';
-    wrapper.innerHTML=`<video id="videoPlayer" controls crossorigin="anonymous" playsinline style="width:100%;border-radius:14px"></video>`;
-    const spinner=createSpinner();
+    // Отрисовка плеера + спиннера
+    playerWrapper.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'relative';
+    wrapper.innerHTML = `
+      <video id="videoPlayer" controls crossorigin="anonymous" playsinline
+             style="width:100%;border-radius:14px"></video>
+    `;
+    const spinner = createSpinner();
     wrapper.appendChild(spinner);
     playerWrapper.appendChild(wrapper);
 
-    // бейдж с ID (единственный)
-    const badge=document.createElement('div');
-    badge.className='room-id-badge';
-    badge.innerHTML=`<small>ID комнаты:</small><code>${roomId}</code><button id="copyRoomId">Копировать</button>`;
+    // Бейдж с одним ID комнаты
+    const badge = document.createElement('div');
+    badge.className = 'room-id-badge';
+    badge.innerHTML = `
+      <small>ID комнаты:</small>
+      <code>${roomId}</code>
+      <button id="copyRoomId">Копировать</button>
+    `;
     playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick=()=>{
+    document.getElementById('copyRoomId').onclick = () => {
       navigator.clipboard.writeText(roomId);
-      alert('Скопировано');
+      alert('ID комнаты скопирован');
     };
 
-    const v=document.getElementById('videoPlayer');
-    if(Hls.isSupported()){
-      const hls=new Hls({debug:false});
+    // Подключаем HLS.js
+    const v = document.getElementById('videoPlayer');
+    if (Hls.isSupported()) {
+      const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
-      hls.on(Hls.Events.ERROR,(_,d)=>{
-        console.error(d);
-        alert('Ошибка видео');
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        console.error('[HLS] Ошибка:', data);
+        alert('Ошибка загрузки видео');
       });
-      v.addEventListener('waiting',()=>spinner.style.display='block');
-      v.addEventListener('playing',()=>spinner.style.display='none');
-    } else if(v.canPlayType('application/vnd.apple.mpegurl')){
-      v.src=movie.videoUrl;
-    } else throw new Error('HLS не поддерживается');
+      v.addEventListener('waiting', () => spinner.style.display = 'block');
+      v.addEventListener('playing', () => spinner.style.display = 'none');
+    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = movie.videoUrl;
+    } else {
+      throw new Error('Ваш браузер не поддерживает HLS');
+    }
 
-    // управление
-    v.addEventListener('play',()=>{
-      if(isSeeking||isRemoteAction)return;
-      socket.emit('player_action',{roomId,position:v.currentTime,is_paused:false});
+    // События управления плеером
+    v.addEventListener('play', () => {
+      if (isSeeking || isRemoteAction) return;
+      socket.emit('player_action', {
+        roomId,
+        position: v.currentTime,
+        is_paused: false
+      });
     });
-    v.addEventListener('pause',()=>{
-      if(isSeeking||isRemoteAction)return;
-      socket.emit('player_action',{roomId,position:v.currentTime,is_paused:true});
+    v.addEventListener('pause', () => {
+      if (isSeeking || isRemoteAction) return;
+      socket.emit('player_action', {
+        roomId,
+        position: v.currentTime,
+        is_paused: true
+      });
     });
-    v.addEventListener('seeking',()=>isSeeking=true);
-    v.addEventListener('seeked',()=>{
-      if(!isRemoteAction){
-        socket.emit('player_action',{roomId,position:v.currentTime,is_paused:v.paused});
+    v.addEventListener('seeking', () => { isSeeking = true; });
+    v.addEventListener('seeked', () => {
+      if (!isRemoteAction) {
+        socket.emit('player_action', {
+          roomId,
+          position: v.currentTime,
+          is_paused: v.paused
+        });
       }
-      setTimeout(()=>isSeeking=false,200);
+      setTimeout(() => isSeeking = false, 200);
     });
 
-    player=v;
-  }catch(err){
-    console.error(err);
-    playerWrapper.innerHTML=`<p class="error">Ошибка: ${err.message}</p>`;
+    player = v;
+  } catch (err) {
+    console.error('[ERROR] Ошибка комнаты:', err);
+    playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
 fetchRoom();
 
-// append chat
-function appendMessage(a,t){
-  const d=document.createElement('div');
-  d.className='chat-message';
-  d.innerHTML=`<strong>${a}:</strong> ${t}`;
-  messagesBox.appendChild(d);
-  messagesBox.scrollTop=messagesBox.scrollHeight;
+// Утилита для добавления сообщений
+function appendMessage(author, text) {
+  const div = document.createElement('div');
+  div.className = 'chat-message';
+  div.innerHTML = `<strong>${author}:</strong> ${text}`;
+  messagesBox.appendChild(div);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-
-// открыть/закрыть чат по overlay
-overlay.addEventListener('click',e=>{
-  if(e.target===overlay) overlay.classList.remove('active');
-});
-// предположим, что где-то есть кнопка открыть чат:
-document.getElementById('openChatBtn')?.addEventListener('click',()=>{
-  overlay.classList.add('active');
-});

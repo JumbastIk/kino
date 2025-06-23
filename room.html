@@ -4,17 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.0.717121121222223121121211221222131121323122123312132212312212321212132341212212222222322222221232222127322221132222222222312124112122711131117212111771" />
-  <link rel="stylesheet" href="room.css?v=1.0.7221221312222177122211232212121112123123112112323112332221123242132213212222222122213221222222231232221222212122232212232221142711221217113211271111271" />
+  <link rel="stylesheet" href="style.css?v=1.0.7171112122231112121221221222131121323122123312132212312212321212132341212212222222322222221232222127322221132222222222312124112122711131117212111771" />
+  <link rel="stylesheet" href="room.css?v=1.0.72212131221771221123222212121112123123112112323112332221123242132213212222222122213221222222231232221222212122232212232221142711221217113211271111271" />
 </head>
 <body>
   <div class="room-container">
-    <!-- Назад -->
+    <!-- Назад к описанию -->
     <a id="backLink" href="index.html" class="back-link">← Назад к описанию</a>
 
     <!-- Плеер -->
-    <div id="playerWrapper" class="player-wrapper">
-      <!-- видео подгрузится JS -->
+    <div class="player-wrapper" id="playerWrapper">
+      <!-- Видео вставляется через JS -->
     </div>
 
     <!-- Бейдж с ID комнаты -->
@@ -24,17 +24,21 @@
       <button id="copyRoomId">Копировать</button>
     </div>
 
-    <!-- Чат -->
-    <div class="chat-overlay">
-      <div class="chat-container">
-        <div id="messages" class="chat-messages"></div>
-        <div class="chat-input-wrap">
-          <input id="msgInput" placeholder="Введите сообщение…" />
-          <button id="sendBtn">Отправить</button>
-          <button id="micBtn" class="mic-btn">🎤</button>
-        </div>
-        <div id="membersList" class="chat-members"></div>
+    <!-- Кнопка для открытия/закрытия чата -->
+    <button id="openChatBtn" class="open-chat-btn">💬 Открыть чат</button>
+  </div>
+
+  <!-- Оверлей и контейнер чата (по умолчанию скрыт) -->
+  <div class="chat-overlay" id="chatOverlay">
+    <div class="chat-container">
+      <div id="messages" class="chat-messages"></div>
+      <div class="chat-input-wrap">
+        <input id="msgInput" placeholder="Введите сообщение…" autocomplete="off" />
+        <button id="sendBtn">Отправить</button>
+        <!-- микрофон -->
+        <!-- микрофон-кнопка создаётся в JS -->
       </div>
+      <div id="membersList" class="chat-members"></div>
     </div>
   </div>
 
@@ -42,7 +46,7 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="data.js?v=1.0.17712221711212211231321122122121322123122211123221112323212122222132121232131222314134252222222222122232221222422213221211223123111321122222222221127111312717"></script>
-  <script src="room.js?v=1.0.1773212212212112231232112222112321212322211131231122221221122222213212221231231223214532522222221132222221227132222312122322212411231211122222222211112371121717"></script>
+  <script src="data.js?v=1.0.177117112221221123132112122121322123122211123221112323212122222132121232131222314134252222222222122232221222422213221211223123111321122222222221127111312717"></script>
+  <script src="room.js?v=1.0.17732112222111223123211222112321212322211131231122221221122222213212221231231223214532522222221132222221227132222312122322212411231211122222222211112371121717"></script>
 </body>
 </html>
