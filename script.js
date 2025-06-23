@@ -12,7 +12,6 @@ const socket = io(API_BASE, {
 
 socket.on('connect_error', err => console.error('Socket.IO connect error:', err));
 socket.on('connect', () => console.log('Socket.IO connected:', socket.id));
-
 socket.on('room_created', room => addRoomToSlider(room, true));
 socket.on('room_updated', ({ id, viewers }) => {
   const slide = document.querySelector(`.slide[data-room-id="${id}"]`);
@@ -26,15 +25,13 @@ function createMovieCard(movie) {
   link.href = `movie.html?id=${encodeURIComponent(movie.id)}`;
   link.className = 'movie-link';
   link.style.textDecoration = 'none';
-
-  const card = document.createElement('div');
-  card.className = 'movie-card';
-  card.innerHTML = `
-    <img src="${movie.poster}" alt="${movie.title}" />
-    <h3>${movie.title}</h3>
-    <p>${movie.desc}</p>
+  link.innerHTML = `
+    <div class="movie-card">
+      <img src="${movie.poster}" alt="${movie.title}" />
+      <h3>${movie.title}</h3>
+      <p>${movie.desc}</p>
+    </div>
   `;
-  link.appendChild(card);
   return link;
 }
 
@@ -43,12 +40,12 @@ function renderMainSlider() {
   if (!main) return;
   const ids = (main.dataset.movieIds || '')
     .split(',').map(x => x.trim()).filter(Boolean);
-
   main.innerHTML = '';
   main.style.display = 'flex';
   main.style.overflowX = 'auto';
-  movies.filter(m => ids.includes(m.id))
-        .forEach(m => main.appendChild(createMovieCard(m)));
+  movies
+    .filter(m => ids.includes(m.id))
+    .forEach(m => main.appendChild(createMovieCard(m)));
 }
 
 function renderCategories() {
@@ -59,8 +56,9 @@ function renderCategories() {
     slider.innerHTML = '';
     slider.style.display = 'flex';
     slider.style.overflowX = 'auto';
-    movies.filter(m => m.category === genre)
-          .forEach(m => slider.appendChild(createMovieCard(m)));
+    movies
+      .filter(m => m.category === genre)
+      .forEach(m => slider.appendChild(createMovieCard(m)));
   });
 }
 
@@ -83,12 +81,17 @@ function initSliderControls() {
 async function loadRooms() {
   const res = await fetch(API_URL);
   if (!res.ok) throw new Error(`Ошибка ${res.status} при загрузке комнат`);
-  return await res.json();
+  return res.json();
 }
 
 function addRoomToSlider(room, highlight = false) {
   const slider = document.getElementById('roomsSlider');
   if (!slider) return;
+  if (slider.querySelector(`.slide[data-room-id="${room.id}"]`)) {
+    // уже есть: обновим счётчик
+    socket.emit('room_updated', { id: room.id, viewers: room.viewers });
+    return;
+  }
   const slide = document.createElement('div');
   slide.className = 'slide';
   slide.dataset.roomId = room.id;
@@ -97,13 +100,22 @@ function addRoomToSlider(room, highlight = false) {
     slide.style.background = '#222';
   }
   slide.innerHTML = `
-    <a href="room.html?roomId=${encodeURIComponent(room.id)}" class="room-link" style="text-decoration:none;color:inherit;">
+    <a
+      href="room.html?roomId=${encodeURIComponent(room.id)}"
+      class="room-link"
+      style="text-decoration:none;color:inherit;"
+    >
       <div class="room-icon">🎥</div>
       <div class="room-info">
         <div class="room-title">${room.title}</div>
         <div class="room-viewers">${room.viewers} смотрят</div>
       </div>
-      <div class="room-timer">${room.created_at ? new Date(room.created_at).toLocaleTimeString() : ''}</div>
+      <div class="room-timer">
+        ${room.created_at
+          ? new Date(room.created_at).toLocaleTimeString()
+          : ''
+        }
+      </div>
     </a>
   `;
   slider.insertBefore(slide, slider.firstChild);
@@ -150,7 +162,45 @@ async function createRoom(title) {
   }
   if (newRoomId) {
     renderRooms(newRoomId);
-    socket.emit('new_room', { room: { id: newRoomId, title, viewers: 1, created_at: new Date() } });
+    // подсветим найденную комнату
+    setTimeout(() => addRoomToSlider({ id: newRoomId, title, viewers: 1, created_at: new Date() }, true), 100);
+  }
+}
+
+// === ПОИСК КОМНАТЫ ПО ID ===
+async function searchRoomById() {
+  const input = document.getElementById('joinRoomInput');
+  const result = document.getElementById('joinRoomResult');
+  if (!input || !result) return;
+  const id = input.value.trim();
+  result.textContent = '';
+  if (!id) {
+    result.textContent = 'Введите ID комнаты';
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(id)}`);
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Комната не найдена');
+      throw new Error(`Ошибка ${res.status}`);
+    }
+    const room = await res.json();
+    result.innerHTML = `
+      <div class="search-room">
+        <strong>Найдена комната:</strong><br/>
+        <a
+          href="room.html?roomId=${encodeURIComponent(room.id)}"
+          class="search-room-link"
+          style="color:#ff9800; text-decoration:underline;"
+        >
+          ${room.title} (ID: ${room.id}) — ${room.viewers} смотрят
+        </a>
+      </div>
+    `;
+    // Подсветим карточку в слайдере, если она есть
+    addRoomToSlider(room, true);
+  } catch (err) {
+    result.textContent = err.message;
   }
 }
 
@@ -160,4 +210,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initSliderControls();
   renderRooms();
   window.createRoom = createRoom;
+
+  const joinBtn = document.getElementById('joinRoomBtn');
+  if (joinBtn) {
+    joinBtn.addEventListener('click', searchRoomById);
+  }
 });
