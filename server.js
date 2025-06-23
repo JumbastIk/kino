@@ -1,5 +1,3 @@
-// server.js
-
 require('dotenv').config();
 const http      = require('http');
 const express   = require('express');
@@ -18,7 +16,7 @@ app.use(cors({
     'https://www.dsgsasd.ru',
     'https://web.telegram.org'
   ],
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET','POST','OPTIONS'],
   allowedHeaders: ['Content-Type'],
   credentials: true
 }));
@@ -65,9 +63,9 @@ app.post('/api/rooms', async (req, res) => {
       .from('rooms')
       .insert([{
         id,
-        title:     title || 'Без названия',
-        movie_id:  movieId,
-        viewers:   1
+        title:    title || 'Без названия',
+        movie_id: movieId,
+        viewers:  1
       }]);
     if (insertError) throw insertError;
 
@@ -117,9 +115,7 @@ app.post('/api/messages', async (req, res) => {
 
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const index = path.join(__dirname, 'index.html');
-  if (fs.existsSync(index)) {
-    return res.sendFile(index);
-  }
+  if (fs.existsSync(index)) return res.sendFile(index);
   res.status(404).send('index.html not found');
 });
 
@@ -149,24 +145,25 @@ io.on('connection', socket => {
       userId      = userData.id;
       socket.join(roomId);
 
-      // upsert только room_id и user_id
+      // Добавляем/обновляем участника
       await supabase
         .from('room_members')
-        .upsert({
-          room_id: roomId,
-          user_id: userId
-        }, { onConflict: ['room_id','user_id'] });
+        .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] });
 
-      // select только user_id
-      const { data: members, error } = await supabase
+      // Отправляем обновлённый список
+      const { data: members } = await supabase
         .from('room_members')
         .select('user_id')
         .eq('room_id', roomId);
+      io.to(roomId).emit('members', members);
 
-      if (!error) {
-        io.to(roomId).emit('members', members);
-      }
+      // Системное сообщение
+      io.to(roomId).emit('system_message', {
+        text:       `Пользователь ${userId} вошёл в комнату`,
+        created_at: new Date().toISOString()
+      });
 
+      // История чата
       const { data: messages } = await supabase
         .from('messages')
         .select('author, text, created_at')
@@ -174,6 +171,7 @@ io.on('connection', socket => {
         .order('created_at', { ascending: true });
       socket.emit('history', messages);
 
+      // Синхронизируем плеер
       const state = roomsState[roomId] || { time: 0, playing: false, speed: 1 };
       socket.emit('sync_state', {
         position:  state.time,
@@ -204,10 +202,10 @@ io.on('connection', socket => {
 
   socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
     roomsState[roomId] = {
-      time:        position,
-      playing:     !is_paused,
+      time:       position,
+      playing:    !is_paused,
       speed,
-      lastUpdate:  Date.now()
+      lastUpdate: Date.now()
     };
     socket.to(roomId).emit('player_update', { position, is_paused, speed });
   });
@@ -225,18 +223,24 @@ io.on('connection', socket => {
     try {
       if (!currentRoom || !userId) return;
 
+      // Удаляем участника
       await supabase
         .from('room_members')
         .delete()
         .match({ room_id: currentRoom, user_id: userId });
 
-      const { data: members, error } = await supabase
+      // Новый список
+      const { data: members } = await supabase
         .from('room_members')
         .select('user_id')
         .eq('room_id', currentRoom);
-      if (!error) {
-        io.to(currentRoom).emit('members', members);
-      }
+      io.to(currentRoom).emit('members', members);
+
+      // Системное сообщение
+      io.to(currentRoom).emit('system_message', {
+        text:       `Пользователь ${userId} вышел из комнаты`,
+        created_at: new Date().toISOString()
+      });
     } catch (err) {
       console.error('disconnect error:', err.message);
     }
@@ -244,6 +248,4 @@ io.on('connection', socket => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server started on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server started on port ${PORT}`));
