@@ -27,11 +27,98 @@ let player;
 let isSeeking      = false;
 let isRemoteAction = false;
 
-// подключаемся
-socket.emit('join',          { roomId, userData: { id: Date.now(), first_name: 'Гость' } });
+// ==== WebRTC голосовой чат ====
+let localStream = null;
+const peers = {}; // { peerId: RTCPeerConnection }
+
+// создаём кнопку «Микрофон» внизу чата
+const micBtn = document.createElement('button');
+micBtn.textContent = '🎤 Вкл. микрофон';
+micBtn.className = 'mic-btn';
+document.querySelector('.chat-input-wrap').appendChild(micBtn);
+
+micBtn.addEventListener('click', async () => {
+  if (!localStream) {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micBtn.textContent = '🔇 Выкл. микрофон';
+      socket.emit('new_peer', { roomId });
+    } catch (err) {
+      console.error('Не удалось получить микрофон:', err);
+      alert('Ошибка доступа к микрофону');
+    }
+  } else {
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+    micBtn.textContent = '🎤 Вкл. микрофон';
+    // закрываем все соединения
+    Object.values(peers).forEach(pc => pc.close());
+    Object.keys(peers).forEach(id => delete peers[id]);
+  }
+});
+
+socket.on('new_peer', async ({ from }) => {
+  if (localStream && from !== socket.id) {
+    await createPeerConnection(from, true);
+  }
+});
+
+socket.on('signal', async ({ from, description, candidate }) => {
+  let pc = peers[from];
+  if (!pc) {
+    pc = await createPeerConnection(from, false);
+  }
+  if (description) {
+    await pc.setRemoteDescription(description);
+    if (description.type === 'offer') {
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('signal', { to: from, description: pc.localDescription });
+    }
+  }
+  if (candidate) {
+    await pc.addIceCandidate(candidate);
+  }
+});
+
+async function createPeerConnection(peerId, isOffer) {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+  peers[peerId] = pc;
+
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+  pc.onicecandidate = e => {
+    if (e.candidate) {
+      socket.emit('signal', { to: peerId, candidate: e.candidate });
+    }
+  };
+
+  pc.ontrack = e => {
+    let audio = document.getElementById(`audio_${peerId}`);
+    if (!audio) {
+      audio = document.createElement('audio');
+      audio.id = `audio_${peerId}`;
+      audio.autoplay = true;
+      document.body.appendChild(audio);
+    }
+    audio.srcObject = e.streams[0];
+  };
+
+  if (isOffer) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit('signal', { to: peerId, description: pc.localDescription });
+  }
+
+  return pc;
+}
+
+// ==== Socket.IO: комната, чат, плеер ====
+socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
-// === Списки и системные сообщения ===
 socket.on('members', members => {
   const count = Array.isArray(members) ? members.length : 0;
   membersList.innerHTML = `
@@ -48,7 +135,6 @@ socket.on('system_message', ({ text }) => {
   messagesBox.scrollTop = messagesBox.scrollHeight;
 });
 
-// === Чат ===
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
@@ -64,12 +150,11 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// === Синхронизация плеера ===
 socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
   isRemoteAction = true;
   player.currentTime = position;
-  is_paused ? player.pause() : player.play().catch(()=>{});
+  is_paused ? player.pause() : player.play().catch(() => {});
   setTimeout(() => isRemoteAction = false, 200);
 });
 socket.on('player_update', ({ position = 0, is_paused }) => {
@@ -77,7 +162,7 @@ socket.on('player_update', ({ position = 0, is_paused }) => {
   isRemoteAction = true;
   isSeeking = true;
   player.currentTime = position;
-  is_paused ? player.pause() : player.play().catch(()=>{});
+  is_paused ? player.pause() : player.play().catch(() => {});
   setTimeout(() => {
     isSeeking = false;
     isRemoteAction = false;
@@ -88,16 +173,11 @@ socket.on('player_update', ({ position = 0, is_paused }) => {
 function createSpinner() {
   const spinner = document.createElement('div');
   spinner.className = 'buffer-spinner';
-  spinner.innerHTML = `<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
+  spinner.innerHTML = '<div class="double-bounce1"></div><div class="double-bounce2"></div>';
   spinner.style.display = 'none';
-  spinner.style.position = 'absolute';
-  spinner.style.top = '50%';
-  spinner.style.left = '50%';
-  spinner.style.transform = 'translate(-50%, -50%)';
   return spinner;
 }
 
-// === Загрузка комнаты и инициализация плеера ===
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -110,19 +190,16 @@ async function fetchRoom() {
 
     backLink.href = `movie.html?id=${movie.id}`;
 
-    // обёртка для видео + спиннера
     playerWrapper.innerHTML = '';
     const container = document.createElement('div');
-    container.className = 'video-container';
     container.style.position = 'relative';
-    container.innerHTML = `<video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline style="width:100%;"></video>`;
+    container.innerHTML = '<video id="videoPlayer" class="video-player" controls crossorigin="anonymous" playsinline style="width:100%;"></video>';
     const spinner = createSpinner();
     container.appendChild(spinner);
     playerWrapper.appendChild(container);
 
     const video = document.getElementById('videoPlayer');
 
-    // HLS.js + буферизация
     if (Hls.isSupported()) {
       const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
@@ -131,16 +208,14 @@ async function fetchRoom() {
         console.error('[HLS] Ошибка:', data);
         alert(`Ошибка загрузки видео.\nПроверьте CORS/CDN для ${window.location.origin}`);
       });
-      // Показать спиннер на ожидание буфера
-      video.addEventListener('waiting', () => { spinner.style.display = 'block'; });
-      video.addEventListener('playing', () => { spinner.style.display = 'none'; });
+      video.addEventListener('waiting', () => spinner.style.display = 'block');
+      video.addEventListener('playing', () => spinner.style.display = 'none');
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
     } else {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
-    // Управление
     video.addEventListener('play', () => {
       if (isSeeking || isRemoteAction) return;
       socket.emit('player_action', { roomId, position: video.currentTime, is_paused: false });
@@ -149,7 +224,7 @@ async function fetchRoom() {
       if (isSeeking || isRemoteAction) return;
       socket.emit('player_action', { roomId, position: video.currentTime, is_paused: true });
     });
-    video.addEventListener('seeking', () => { isSeeking = true; });
+    video.addEventListener('seeking', () => isSeeking = true);
     video.addEventListener('seeked', () => {
       if (!isRemoteAction) {
         socket.emit('player_action', { roomId, position: video.currentTime, is_paused: video.paused });
@@ -166,7 +241,7 @@ async function fetchRoom() {
 
 fetchRoom();
 
-// === Вспомогалка для чата ===
+// чат-утилита
 function appendMessage(author, text) {
   const div = document.createElement('div');
   div.className = 'chat-message';
