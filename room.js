@@ -1,3 +1,5 @@
+// room.js
+
 const BACKEND = (location.hostname.includes('localhost'))
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
@@ -263,10 +265,16 @@ async function fetchRoom() {
       setTimeout(() => isSeeking = false, 120);
     });
 
-    // --- Для не-owner блокируем управление полностью ---
+    // --- Для не-owner: разрешить единственный клик для разблокировки автоплея, далее блокировать управление ---
     if (!iAmOwner) {
       v.controls = false;
-      v.style.pointerEvents = 'none'; // полностью блокируем любые события мыши/клавиатуры
+      // Разрешаем один клик как user gesture
+      const unlockAutoplay = () => {
+        // После клика отключаем любые дальнейшие взаимодействия
+        v.style.pointerEvents = 'none';
+        v.removeEventListener('click', unlockAutoplay);
+      };
+      v.addEventListener('click', unlockAutoplay, { once: true });
     }
 
     player = v;
