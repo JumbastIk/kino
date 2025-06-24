@@ -23,7 +23,8 @@ const membersList   = document.getElementById('membersList');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
-let player, isSeeking = false, isRemoteAction = false;
+let player, blocker;
+let isSeeking = false, isRemoteAction = false;
 let lastUpdate = 0;
 let ownerId = null;
 let iAmOwner = false;
@@ -54,22 +55,31 @@ function updateOwnerState(newOwnerId) {
   iAmOwner = (myUserId === ownerId);
 }
 
+// --- Отправка действий владельца ---
+function emitPlayerAction(paused) {
+  socket.emit('player_action', {
+    roomId,
+    position:  player.currentTime,
+    is_paused: paused,
+    speed:     player.playbackRate,
+    updatedAt: Date.now(),
+    userId:    myUserId
+  });
+}
+
+// Присоединяемся и запрашиваем состояние
 socket.on('connect', () => {
   myUserId = socket.id;
-  joinAndRequestState();
-  fetchRoom();
-});
-
-function joinAndRequestState() {
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
-}
+  fetchRoom();
+});
 
 // === Участники комнаты ===
 socket.on('members', members => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${members.length}):</div>
-    <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
+     <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
 });
 
 // =========== Чат ===========
@@ -79,11 +89,10 @@ socket.on('history', data => {
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => {
-  if (msg && msg.text) appendSystemMessage(msg.text);
+  if (msg?.text) appendSystemMessage(msg.text);
 });
-
 sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
+msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage);
 function sendMessage() {
   const text = msgInput.value.trim();
   if (!text) return;
@@ -91,7 +100,7 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// --- Основная синхронизация: только если реально требуется ---
+// --- Дебаунс для sync
 function debouncedSync(position, is_paused, updatedAt, owner_id) {
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
@@ -99,26 +108,26 @@ function debouncedSync(position, is_paused, updatedAt, owner_id) {
   }, 100);
 }
 
+// Собственно синхронизация
 function syncPlayer(position, is_paused, updatedAt, owner_id) {
   updateOwnerState(owner_id);
+  // показываем/скрываем блокер
+  if (blocker) blocker.style.display = iAmOwner ? 'none' : 'block';
+
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
   if (!player) return;
 
   isRemoteAction = true;
 
-  // Делаем seek только если реальная разница
   if (Math.abs(player.currentTime - position) > 0.7 && player.readyState > 0) {
     player.currentTime = position;
   }
-
-  // Только если отличается состояние
   if (is_paused && !player.paused) {
     player.pause();
   }
   if (!is_paused && player.paused) {
     player.play().catch(() => {
-      // Показываем подсказку только 1 раз
       if (!window.__autoplayWarned) {
         window.__autoplayWarned = true;
         alert('Разрешите автозапуск, кликнув по видео.');
@@ -128,7 +137,7 @@ function syncPlayer(position, is_paused, updatedAt, owner_id) {
   setTimeout(() => isRemoteAction = false, 120);
 }
 
-// --- Слушаем все события синхронизации всегда (и owner, и не-owner) ---
+// Слушаем синхронизацию и обновления
 socket.on('sync_state', data => {
   if (!player) {
     initialSync = data;
@@ -140,6 +149,7 @@ socket.on('player_update', data => {
   debouncedSync(data.position, data.is_paused, data.updatedAt, data.owner_id);
 });
 
+// --- Получить данные комнаты и инициализировать плеер ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -147,7 +157,6 @@ async function fetchRoom() {
     const roomData = await res.json();
 
     updateOwnerState(roomData.owner_id);
-
     if (!roomData.owner_id && myUserId) {
       await setOwnerIdInDb(roomId, myUserId);
       ownerId = myUserId;
@@ -155,25 +164,43 @@ async function fetchRoom() {
     }
 
     const movie = movies.find(m => m.id === roomData.movie_id);
-    if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
+    if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
+    // Создаём контейнер для видео + блокера
     playerWrapper.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.style.position = 'relative';
-    wrap.innerHTML =
-      `<video id="videoPlayer" controls crossorigin="anonymous" playsinline
-             style="width:100%;border-radius:14px"></video>`;
+    wrap.innerHTML = `
+      <video id="videoPlayer" controls crossorigin="anonymous" playsinline
+             style="width:100%; border-radius:14px"></video>
+    `;
+    // спиннер
     const spinner = createSpinner();
     wrap.appendChild(spinner);
+    // блокер поверх видео
+    blocker = document.createElement('div');
+    blocker.id = 'blocker';
+    Object.assign(blocker.style, {
+      position: 'absolute',
+      top: '0', left: '0',
+      width: '100%', height: '100%',
+      background: 'rgba(0,0,0,0)',
+      pointerEvents: 'all',
+      display: iAmOwner ? 'none' : 'block'
+    });
+    wrap.appendChild(blocker);
+
     playerWrapper.appendChild(wrap);
 
+    // бейдж комнаты
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
-    badge.innerHTML =
-      `<small>ID комнаты:</small>
+    badge.innerHTML = `
+      <small>ID комнаты:</small>
       <code>${roomId}</code>
-      <button id="copyRoomId">Копировать</button>`;
+      <button id="copyRoomId">Копировать</button>
+    `;
     playerWrapper.after(badge);
     document.getElementById('copyRoomId').onclick = () => {
       navigator.clipboard.writeText(roomId);
@@ -183,7 +210,7 @@ async function fetchRoom() {
     const v = document.getElementById('videoPlayer');
     let hls = null;
 
-    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    if (window.Hls?.isSupported()) {
       hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
@@ -199,86 +226,38 @@ async function fetchRoom() {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
-    // --- Применить sync_state если есть ---
+    // применяем начальный sync, когда метаданные загружены
     v.addEventListener('loadedmetadata', () => {
       if (initialSync) {
-        isRemoteAction = true;
-        if (Math.abs(v.currentTime - initialSync.position) > 0.7) {
-          v.currentTime = initialSync.position;
-        }
-        if (initialSync.is_paused && !v.paused) {
-          v.pause();
-        }
-        if (!initialSync.is_paused && v.paused) {
-          v.play().catch(() => {});
-        }
-        setTimeout(() => isRemoteAction = false, 120);
+        syncPlayer(initialSync.position, initialSync.is_paused, initialSync.updatedAt, initialSync.owner_id);
         initialSync = null;
       }
     });
 
-    // --- Owner может управлять, остальные только смотрят ---
-    v.addEventListener('play', e => {
+    // Слушатели play/pause/seek для owner-а
+    v.addEventListener('play', () => {
       if (!iAmOwner) {
-        e.preventDefault();
-        v.pause();
-        return false;
+        player.pause();
+        return;
       }
-      if (iAmOwner && !isSeeking && !isRemoteAction) {
-        socket.emit('player_action', {
-          roomId,
-          position: v.currentTime,
-          is_paused: false,
-          updatedAt: Date.now(),
-          userId: myUserId
-        });
-      }
+      if (!isRemoteAction) emitPlayerAction(false);
     });
-    v.addEventListener('pause', e => {
+    v.addEventListener('pause', () => {
       if (!iAmOwner) {
-        e.preventDefault();
-        if (!v.paused) v.pause();
-        return false;
+        player.pause();
+        return;
       }
-      if (iAmOwner && !isSeeking && !isRemoteAction) {
-        socket.emit('player_action', {
-          roomId,
-          position: v.currentTime,
-          is_paused: true,
-          updatedAt: Date.now(),
-          userId: myUserId
-        });
-      }
+      if (!isRemoteAction) emitPlayerAction(true);
     });
-
     v.addEventListener('seeking', () => { isSeeking = true; });
     v.addEventListener('seeked', () => {
       if (iAmOwner && !isRemoteAction) {
-        socket.emit('player_action', {
-          roomId,
-          position: v.currentTime,
-          is_paused: v.paused,
-          updatedAt: Date.now(),
-          userId: myUserId
-        });
+        emitPlayerAction(player.paused);
       }
       setTimeout(() => isSeeking = false, 120);
     });
 
-    // --- Для не-owner: разрешить единственный клик для разблокировки автоплея, далее блокировать управление ---
-    if (!iAmOwner) {
-      v.controls = false;
-      // Разрешаем один клик как user gesture
-      const unlockAutoplay = () => {
-        // После клика отключаем любые дальнейшие взаимодействия
-        v.style.pointerEvents = 'none';
-        v.removeEventListener('click', unlockAutoplay);
-      };
-      v.addEventListener('click', unlockAutoplay, { once: true });
-    }
-
     player = v;
-
   } catch (err) {
     console.error('[ERROR] Ошибка комнаты:', err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
@@ -292,9 +271,10 @@ socket.on('owner_changed', newOwnerId => {
 function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
-  s.innerHTML =
-    `<div class="double-bounce1"></div>
-    <div class="double-bounce2"></div>`;
+  s.innerHTML = `
+    <div class="double-bounce1"></div>
+    <div class="double-bounce2"></div>
+  `;
   s.style.display = 'none';
   return s;
 }

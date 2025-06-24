@@ -230,3 +230,15 @@ html, body {
     max-width: none;
   }
 }
+
+.video-blocker {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  /* пустой прозрачный слой */
+  background: rgba(0,0,0,0);
+  /* блокирует любые взаимодействия */
+  pointer-events: all;
+  /* по умолчанию скрыт для owner-а */
+  display: none;
+}
