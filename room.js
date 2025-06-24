@@ -24,7 +24,7 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player, blocker;
-let isSeeking = false, isRemoteAction = false;
+let isRemoteAction = false;
 let lastUpdate = 0;
 let ownerId = null;
 let iAmOwner = false;
@@ -108,9 +108,14 @@ function debouncedSync(pos, paus, time, oid){
 
 function syncPlayer(pos, paus, time, oid){
   updateOwnerState(oid);
-  // применяем блокировку только к зрителям
-  blocker.style.display = (!iAmOwner && controlsLocked) ? 'block' : 'none';
-  player.controls      = iAmOwner || !controlsLocked;
+
+  // владелец всегда с контролами, у зрителей контролы по флагу
+  if (blocker) {
+    blocker.style.display = (!iAmOwner && controlsLocked) ? 'block' : 'none';
+  }
+  if (player) {
+    player.controls = iAmOwner || !controlsLocked;
+  }
 
   if(time<lastUpdate) return;
   lastUpdate = time;
@@ -200,11 +205,10 @@ async function fetchRoom(){
       badge.after(ctrlDiv);
       document.getElementById('toggleLock').addEventListener('change',e=>{
         controlsLocked = e.target.checked;
-        // шлём всем
         socket.emit('toggle_controls',{ roomId, locked: controlsLocked });
-        // применяем только для зрителей
-        blocker.style.display = controlsLocked ? 'block' : 'none';
-        player.controls      = true; // owner всегда с controls
+        // сразу применяем локально
+        blocker.style.display = 'none';
+        player.controls      = true;
       });
     }
 
@@ -213,7 +217,6 @@ async function fetchRoom(){
       const hls=new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
-      hls.on(Hls.Events.ERROR,(_,d)=>console.error(d));
       v.addEventListener('waiting',()=>spinner.style.display='block');
       v.addEventListener('playing',()=>spinner.style.display='none');
     } else if(v.canPlayType('application/vnd.apple.mpegurl')){
@@ -247,10 +250,9 @@ async function fetchRoom(){
       }
       if(iAmOwner && !isRemoteAction) emitPlayerAction(true);
     });
-    v.addEventListener('seeking',()=>{ isSeeking=true; });
+    v.addEventListener('seeking',()=>{ });
     v.addEventListener('seeked',()=>{
       if(iAmOwner && !isRemoteAction) emitPlayerAction(v.paused);
-      setTimeout(()=>isSeeking=false,120);
     });
 
     player = v;
@@ -261,14 +263,14 @@ async function fetchRoom(){
   }
 }
 
-// сервер меняет флаг
+// Сервер меняет флаг
 socket.on('controls_locked', locked=>{
   controlsLocked = locked;
-  blocker.style.display = (!iAmOwner && controlsLocked)?'block':'none';
+  blocker.style.display = (!iAmOwner && controlsLocked) ? 'block' : 'none';
   player.controls      = iAmOwner || !controlsLocked;
 });
 
-// при смене owner-а
+// При смене owner-а
 socket.on('owner_changed',newId=>{
   updateOwnerState(newId);
 });
