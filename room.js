@@ -23,7 +23,7 @@ const membersList   = document.getElementById('membersList');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
-let player, blocker;
+let player;
 let isRemoteAction = false;
 let lastUpdate = 0;
 let ownerId = null;
@@ -33,13 +33,17 @@ let initialSync = null;
 let syncTimeout = null;
 let controlsLocked = false;  // флаг блокировки управления
 
-// Универсальная функция: показывает/скрывает overlay и включает/выключает controls
+// Показываем или скрываем только play/progress, оставляя volume/quality/fullscreen
 function applyControlsLockUI() {
-  if (blocker) {
-    blocker.style.display = (!iAmOwner && controlsLocked) ? 'block' : 'none';
-  }
-  if (player) {
-    player.controls = (iAmOwner || !controlsLocked);
+  const playBtn = document.getElementById('btn-play');
+  const progress = document.getElementById('progress-container');
+  if (!playBtn || !progress) return;
+  if (!iAmOwner && controlsLocked) {
+    playBtn.style.display = 'none';
+    progress.style.display = 'none';
+  } else {
+    playBtn.style.display = '';
+    progress.style.display = '';
   }
 }
 
@@ -118,8 +122,6 @@ function debouncedSync(pos, paus, time, oid){
 
 function syncPlayer(pos, paus, time, oid){
   updateOwnerState(oid);
-
-  // Применяем блокировку контролов
   applyControlsLockUI();
 
   if(time<lastUpdate) return;
@@ -132,12 +134,7 @@ function syncPlayer(pos, paus, time, oid){
   }
   if(paus && !player.paused) player.pause();
   if(!paus && player.paused){
-    player.play().catch(()=>{
-      if(!window.__autoplayWarned){
-        window.__autoplayWarned=true;
-        alert('Нажмите по видео для автозапуска');
-      }
-    });
+    player.play().catch(()=>{});
   }
   setTimeout(()=>isRemoteAction=false,120);
 }
@@ -157,9 +154,7 @@ async function fetchRoom(){
     if(!res.ok) throw new Error(res.status);
     const roomData = await res.json();
 
-    // Учёт состояния блокировки из БД
     controlsLocked = !!roomData.controls_locked;
-
     updateOwnerState(roomData.owner_id);
     if(!roomData.owner_id && myUserId){
       await setOwnerIdInDb(roomId,myUserId);
@@ -171,70 +166,94 @@ async function fetchRoom(){
     if(!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
-    // видео + блокер
-    playerWrapper.innerHTML='';
-    const wrap = document.createElement('div');
-    wrap.style.position='relative';
-    wrap.innerHTML = `<video id="videoPlayer" controls crossorigin="anonymous" playsinline
-                           style="width:100%;border-radius:14px"></video>`;
-    const spinner = createSpinner();
-    wrap.appendChild(spinner);
-    blocker = document.createElement('div');
-    blocker.id='blocker';
-    Object.assign(blocker.style,{
-      position:'absolute',top:0,left:0,width:'100%',height:'100%',
-      background:'rgba(0,0,0,0)',pointerEvents:'all',
-      display:'none'
-    });
-    wrap.appendChild(blocker);
-    playerWrapper.appendChild(wrap);
-
-    // badge
-    const badge=document.createElement('div');
-    badge.className='room-id-badge';
-    badge.innerHTML=`
-      <small>ID комнаты:</small>
-      <code>${roomId}</code>
-      <button id="copyRoomId">Копировать</button>
+    // видео
+    playerWrapper.innerHTML = `
+      <div class="video-container">
+        <video id="videoPlayer" playsinline crossorigin="anonymous"></video>
+        <div id="initial-overlay" class="overlay">
+          <button id="btn-initial-play">▶ Запустить видео</button>
+        </div>
+        <div id="custom-controls" class="controls">
+          <button id="btn-play">▶️</button>
+          <div id="progress-container"><div id="progress-bar"></div></div>
+          <button id="btn-vol">🔊</button>
+          <select id="select-quality"></select>
+          <button id="btn-fullscreen">⛶</button>
+        </div>
+      </div>
     `;
-    playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick=()=>{
-      navigator.clipboard.writeText(roomId);
-      alert('Скопировано');
-    };
 
-    // чекбокс блокировки только для owner-а
-    if(iAmOwner){
-      const ctrlDiv=document.createElement('div');
-      ctrlDiv.style.margin='8px 0';
-      ctrlDiv.innerHTML=`
-        <label>
-          <input type="checkbox" id="toggleLock" ${controlsLocked?'checked':''}/>
-          Запретить переключение зрителям
-        </label>
-      `;
-      badge.after(ctrlDiv);
-      document.getElementById('toggleLock').addEventListener('change',e=>{
-        controlsLocked = e.target.checked;
-        socket.emit('toggle_controls',{ roomId, locked: controlsLocked });
-        // сразу применяем локально
-        applyControlsLockUI();
-      });
-    }
+    player = document.getElementById('videoPlayer');
+    const overlay = document.getElementById('initial-overlay');
+    const btnInit = document.getElementById('btn-initial-play');
+    const btnPlay = document.getElementById('btn-play');
+    const progCont = document.getElementById('progress-container');
+    const progBar = document.getElementById('progress-bar');
+    const btnVol = document.getElementById('btn-vol');
+    const selectQ = document.getElementById('select-quality');
+    const btnFS = document.getElementById('btn-fullscreen');
 
-    const v = document.getElementById('videoPlayer');
+    // HLS
     if(window.Hls?.isSupported()){
       const hls=new Hls();
       hls.loadSource(movie.videoUrl);
-      hls.attachMedia(v);
-      v.addEventListener('waiting',()=>spinner.style.display='block');
-      v.addEventListener('playing',()=>spinner.style.display='none');
-    } else if(v.canPlayType('application/vnd.apple.mpegurl')){
-      v.src=movie.videoUrl;
+      hls.attachMedia(player);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        selectQ.innerHTML = hls.levels
+          .map((l,i)=>`<option value="${i}">${l.height}p</option>`)
+          .join('');
+      });
+    } else if(player.canPlayType('application/vnd.apple.mpegurl')){
+      player.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
 
-    v.addEventListener('loadedmetadata',()=>{
-      // применяем блокировку и синхронизацию при старте
+    // первый клик
+    btnInit.addEventListener('click', ()=>{
+      player.play().catch(()=>{});
+      overlay.style.display = 'none';
+      applyControlsLockUI();
+    });
+
+    // play/pause
+    btnPlay.addEventListener('click', ()=>{
+      if (player.paused) player.play(); else player.pause();
+    });
+    player.addEventListener('play', ()=> {
+      if (iAmOwner) emitPlayerAction(false);
+    });
+    player.addEventListener('pause', ()=> {
+      if (iAmOwner) emitPlayerAction(true);
+    });
+
+    // прогресс
+    player.addEventListener('timeupdate', ()=>{
+      const pct = player.currentTime / player.duration * 100;
+      progBar.style.width = pct + '%';
+    });
+    progCont.addEventListener('click', e=>{
+      if (!iAmOwner && controlsLocked) return;
+      const rect = progCont.getBoundingClientRect();
+      const pct = (e.clientX - rect.left) / rect.width;
+      player.currentTime = pct * player.duration;
+    });
+
+    // громкость
+    btnVol.addEventListener('click', ()=>{
+      player.muted = !player.muted;
+    });
+
+    // качество
+    selectQ.addEventListener('change', e=>{
+      if (window.Hls && hls) hls.currentLevel = Number(e.target.value);
+    });
+
+    // fullscreen
+    btnFS.addEventListener('click', ()=>{
+      document.querySelector('.video-container').requestFullscreen();
+    });
+
+    // начальная синхронизация
+    player.addEventListener('loadedmetadata', ()=>{
       applyControlsLockUI();
       if(initialSync){
         syncPlayer(
@@ -247,53 +266,24 @@ async function fetchRoom(){
       }
     });
 
-    // события play/pause/seek
-    v.addEventListener('play',()=>{
-      if(!iAmOwner && controlsLocked){
-        v.pause();
-        return;
-      }
-      if(iAmOwner && !isRemoteAction) emitPlayerAction(false);
-    });
-    v.addEventListener('pause',()=>{
-      if(!iAmOwner && controlsLocked){
-        v.play();
-        return;
-      }
-      if(iAmOwner && !isRemoteAction) emitPlayerAction(true);
-    });
-    v.addEventListener('seeking',()=>{ });
-    v.addEventListener('seeked',()=>{
-      if(iAmOwner && !isRemoteAction) emitPlayerAction(v.paused);
-    });
-
-    player = v;
-
   } catch(err){
     console.error(err);
     playerWrapper.innerHTML=`<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
-// Сервер меняет флаг
+// сервер меняет флаг
 socket.on('controls_locked', locked=>{
   controlsLocked = locked;
   applyControlsLockUI();
 });
 
-// При смене owner-а
-socket.on('owner_changed',newId=>{
+// owner сменился
+socket.on('owner_changed', newId=>{
   updateOwnerState(newId);
   applyControlsLockUI();
 });
 
-function createSpinner(){
-  const s=document.createElement('div');
-  s.className='buffer-spinner';
-  s.innerHTML=`<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
-  s.style.display='none';
-  return s;
-}
 function appendMessage(a,t){
   const d=document.createElement('div');
   d.className='chat-message';
