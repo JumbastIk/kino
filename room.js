@@ -33,13 +33,15 @@ let initialSync = null;
 let syncTimeout = null;
 let controlsLocked = false;  // флаг блокировки управления
 
-// Универсальная функция: показывает/скрывает overlay и включает/выключает controls
+// Показывает/скрывает оверлей и управляет атрибутом controls
 function applyControlsLockUI() {
   if (blocker) {
+    // блокируем любые клики по видео (вместе с контролами)
     blocker.style.display = (!iAmOwner && controlsLocked) ? 'block' : 'none';
   }
   if (player) {
-    player.controls = (iAmOwner || !controlsLocked);
+    // оставляем native controls только владельцу или если блокировка снята
+    player.controls = iAmOwner || !controlsLocked;
   }
 }
 
@@ -118,123 +120,127 @@ function debouncedSync(pos, paus, time, oid){
 
 function syncPlayer(pos, paus, time, oid){
   updateOwnerState(oid);
-
-  // Применяем блокировку контролов
   applyControlsLockUI();
 
-  if(time<lastUpdate) return;
+  if(time < lastUpdate) return;
   lastUpdate = time;
   if(!player) return;
   isRemoteAction = true;
 
-  if(Math.abs(player.currentTime-pos)>0.7 && player.readyState>0){
+  // точное позиционирование
+  if(Math.abs(player.currentTime - pos) > 0.7 && player.readyState > 0){
     player.currentTime = pos;
   }
+  // пауза/плей по state
   if(paus && !player.paused) player.pause();
-  if(!paus && player.paused){
-    player.play().catch(()=>{
-      if(!window.__autoplayWarned){
-        window.__autoplayWarned=true;
-        alert('Нажмите по видео для автозапуска');
-      }
-    });
+  if(!paus && player.paused) {
+    player.play().catch(()=>{});  // уже инициализированный
   }
-  setTimeout(()=>isRemoteAction=false,120);
+  setTimeout(()=>isRemoteAction = false, 120);
 }
 
-socket.on('sync_state', d=>{
+socket.on('sync_state', d =>{
   if(!player) initialSync = d;
-  else debouncedSync(d.position,d.is_paused,d.updatedAt,d.owner_id);
+  else debouncedSync(d.position, d.is_paused, d.updatedAt, d.owner_id);
 });
-socket.on('player_update', d=>{
-  debouncedSync(d.position,d.is_paused,d.updatedAt,d.owner_id);
+socket.on('player_update', d =>{
+  debouncedSync(d.position, d.is_paused, d.updatedAt, d.owner_id);
 });
 
 // --- Инициализация плеера и UI ---
 async function fetchRoom(){
-  try{
+  try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if(!res.ok) throw new Error(res.status);
     const roomData = await res.json();
 
-    // Учёт состояния блокировки из БД
     controlsLocked = !!roomData.controls_locked;
-
     updateOwnerState(roomData.owner_id);
     if(!roomData.owner_id && myUserId){
-      await setOwnerIdInDb(roomId,myUserId);
+      await setOwnerIdInDb(roomId, myUserId);
       ownerId = myUserId;
       iAmOwner = true;
     }
 
-    const movie = movies.find(m=>m.id===roomData.movie_id);
+    const movie = movies.find(m => m.id === roomData.movie_id);
     if(!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
     // видео + блокер
-    playerWrapper.innerHTML='';
+    playerWrapper.innerHTML = '';
     const wrap = document.createElement('div');
-    wrap.style.position='relative';
-    wrap.innerHTML = `<video id="videoPlayer" controls crossorigin="anonymous" playsinline
-                           style="width:100%;border-radius:14px"></video>`;
+    wrap.style.position = 'relative';
+    wrap.innerHTML = `
+      <video id="videoPlayer" controls crossorigin="anonymous" playsinline
+             style="width:100%;border-radius:14px"></video>
+    `;
     const spinner = createSpinner();
     wrap.appendChild(spinner);
     blocker = document.createElement('div');
-    blocker.id='blocker';
-    Object.assign(blocker.style,{
-      position:'absolute',top:0,left:0,width:'100%',height:'100%',
-      background:'rgba(0,0,0,0)',pointerEvents:'all',
-      display:'none'
+    blocker.id = 'blocker';
+    Object.assign(blocker.style, {
+      position:      'absolute',
+      top:           0,
+      left:          0,
+      width:         '100%',
+      height:        '100%',
+      background:    'rgba(0,0,0,0)',
+      pointerEvents: 'all',
+      display:       'none'
     });
     wrap.appendChild(blocker);
     playerWrapper.appendChild(wrap);
 
-    // badge
-    const badge=document.createElement('div');
-    badge.className='room-id-badge';
-    badge.innerHTML=`
+    // бейдж ID под плеером
+    const badge = document.createElement('div');
+    badge.className = 'room-id-badge';
+    badge.innerHTML = `
       <small>ID комнаты:</small>
       <code>${roomId}</code>
       <button id="copyRoomId">Копировать</button>
     `;
     playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick=()=>{
+    document.getElementById('copyRoomId').onclick = () => {
       navigator.clipboard.writeText(roomId);
       alert('Скопировано');
     };
 
-    // чекбокс блокировки только для owner-а
+    // чекбокс блокировки (только owner)
     if(iAmOwner){
-      const ctrlDiv=document.createElement('div');
-      ctrlDiv.style.margin='8px 0';
-      ctrlDiv.innerHTML=`
+      const ctrlDiv = document.createElement('div');
+      ctrlDiv.style.margin = '8px 0';
+      ctrlDiv.innerHTML = `
         <label>
-          <input type="checkbox" id="toggleLock" ${controlsLocked?'checked':''}/>
+          <input type="checkbox" id="toggleLock"
+            ${controlsLocked ? 'checked' : ''}/>
           Запретить переключение зрителям
         </label>
       `;
       badge.after(ctrlDiv);
-      document.getElementById('toggleLock').addEventListener('change',e=>{
+      document.getElementById('toggleLock').addEventListener('change', e => {
         controlsLocked = e.target.checked;
-        socket.emit('toggle_controls',{ roomId, locked: controlsLocked });
-        // сразу применяем локально
+        socket.emit('toggle_controls', { roomId, locked: controlsLocked });
         applyControlsLockUI();
       });
     }
 
-    const v = document.getElementById('videoPlayer');
-    if(window.Hls?.isSupported()){
-      const hls=new Hls();
-      hls.loadSource(movie.videoUrl);
-      hls.attachMedia(v);
-      v.addEventListener('waiting',()=>spinner.style.display='block');
-      v.addEventListener('playing',()=>spinner.style.display='none');
-    } else if(v.canPlayType('application/vnd.apple.mpegurl')){
-      v.src=movie.videoUrl;
-    } else throw new Error('HLS не поддерживается');
+    player = document.getElementById('videoPlayer');
 
-    v.addEventListener('loadedmetadata',()=>{
-      // применяем блокировку и синхронизацию при старте
+    // HLS.js
+    if(window.Hls?.isSupported()){
+      const hls = new Hls();
+      hls.loadSource(movie.videoUrl);
+      hls.attachMedia(player);
+      player.addEventListener('waiting', ()=> spinner.style.display = 'block');
+      player.addEventListener('playing', ()=> spinner.style.display = 'none');
+    } else if(player.canPlayType('application/vnd.apple.mpegurl')){
+      player.src = movie.videoUrl;
+    } else {
+      throw new Error('HLS не поддерживается');
+    }
+
+    // initial sync
+    player.addEventListener('loadedmetadata', ()=>{
       applyControlsLockUI();
       if(initialSync){
         syncPlayer(
@@ -243,68 +249,72 @@ async function fetchRoom(){
           initialSync.updatedAt,
           initialSync.owner_id
         );
-        initialSync=null;
+        initialSync = null;
       }
     });
 
-    // события play/pause/seek
-    v.addEventListener('play',()=>{
+    // блокировка local play/pause/seek у зрителей
+    player.addEventListener('play', ()=>{
       if(!iAmOwner && controlsLocked){
-        v.pause();
-        return;
+        player.pause();
+      } else if(iAmOwner && !isRemoteAction) {
+        emitPlayerAction(false);
       }
-      if(iAmOwner && !isRemoteAction) emitPlayerAction(false);
     });
-    v.addEventListener('pause',()=>{
+    player.addEventListener('pause', ()=>{
       if(!iAmOwner && controlsLocked){
-        v.play();
-        return;
+        player.play();
+      } else if(iAmOwner && !isRemoteAction) {
+        emitPlayerAction(true);
       }
-      if(iAmOwner && !isRemoteAction) emitPlayerAction(true);
     });
-    v.addEventListener('seeking',()=>{ });
-    v.addEventListener('seeked',()=>{
-      if(iAmOwner && !isRemoteAction) emitPlayerAction(v.paused);
+    player.addEventListener('seeked', ()=>{
+      if(iAmOwner && !isRemoteAction) {
+        emitPlayerAction(player.paused);
+      }
     });
 
-    player = v;
+    applyControlsLockUI();
 
   } catch(err){
     console.error(err);
-    playerWrapper.innerHTML=`<p class="error">Ошибка: ${err.message}</p>`;
+    playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
-// Сервер меняет флаг
+// server events
 socket.on('controls_locked', locked=>{
   controlsLocked = locked;
   applyControlsLockUI();
 });
-
-// При смене owner-а
-socket.on('owner_changed',newId=>{
+socket.on('owner_changed', newId=>{
   updateOwnerState(newId);
   applyControlsLockUI();
 });
 
-function createSpinner(){
-  const s=document.createElement('div');
-  s.className='buffer-spinner';
-  s.innerHTML=`<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
-  s.style.display='none';
-  return s;
-}
-function appendMessage(a,t){
-  const d=document.createElement('div');
-  d.className='chat-message';
-  d.innerHTML=`<strong>${a}:</strong> ${t}`;
+// chat helpers
+function appendMessage(a, t){
+  const d = document.createElement('div');
+  d.className = 'chat-message';
+  d.innerHTML = `<strong>${a}:</strong> ${t}`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 function appendSystemMessage(t){
-  const d=document.createElement('div');
-  d.className='chat-message system-message';
-  d.innerHTML=`<em>${t}</em>`;
+  const d = document.createElement('div');
+  d.className = 'chat-message system-message';
+  d.innerHTML = `<em>${t}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
+}
+
+function createSpinner(){
+  const s = document.createElement('div');
+  s.className = 'buffer-spinner';
+  s.innerHTML = `
+    <div class="double-bounce1"></div>
+    <div class="double-bounce2"></div>
+  `;
+  s.style.display = 'none';
+  return s;
 }
