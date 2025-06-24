@@ -166,7 +166,7 @@ async function fetchRoom(){
     if(!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
-    // видео
+    // видео + ID бейдж
     playerWrapper.innerHTML = `
       <div class="video-container">
         <video id="videoPlayer" playsinline crossorigin="anonymous"></video>
@@ -181,7 +181,18 @@ async function fetchRoom(){
           <button id="btn-fullscreen">⛶</button>
         </div>
       </div>
+      <div class="room-id-badge">
+        <small>ID комнаты:</small>
+        <code>${roomId}</code>
+        <button id="copyRoomId">Копировать</button>
+      </div>
     `;
+
+    // копирование ID
+    document.getElementById('copyRoomId').onclick = () => {
+      navigator.clipboard.writeText(roomId);
+      alert('Скопировано');
+    };
 
     player = document.getElementById('videoPlayer');
     const overlay = document.getElementById('initial-overlay');
@@ -194,8 +205,9 @@ async function fetchRoom(){
     const btnFS = document.getElementById('btn-fullscreen');
 
     // HLS
+    let hls;
     if(window.Hls?.isSupported()){
-      const hls=new Hls();
+      hls = new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(player);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -244,7 +256,7 @@ async function fetchRoom(){
 
     // качество
     selectQ.addEventListener('change', e=>{
-      if (window.Hls && hls) hls.currentLevel = Number(e.target.value);
+      if (hls) hls.currentLevel = Number(e.target.value);
     });
 
     // fullscreen
