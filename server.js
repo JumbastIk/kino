@@ -1,147 +1,155 @@
-require('dotenv').config();
-const http      = require('http');
-const express   = require('express');
-const { Server } = require('socket.io');
-const cors      = require('cors');
-const path      = require('path');
-const fs        = require('fs');
-const supabase  = require('./supabase');
+const supabase = require('./supabase');
 
-const app = express();
+// Глобальное состояние для всех комнат (player sync + owner)
+const roomsState = {}; // { [roomId]: { time, playing, speed, updatedAt, ownerId } }
 
-app.use(cors({
-  origin: [
-    'https://kino-fhwp.onrender.com',
-    'https://dsgsasd.ru',
-    'https://www.dsgsasd.ru',
-    'https://web.telegram.org'
-  ],
-  methods: ['GET','POST','OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-  credentials: true
-}));
-app.options('*', cors());
+/**
+ * updatedAt — время последнего sync, для защиты от race conditions
+ * ownerId — user_id владельца комнаты (создателя)
+ */
 
-app.use(express.json());
-app.use(express.static(__dirname));
+module.exports = function(io) {
+  io.on('connection', socket => {
+    let currentRoom = null;
+    let userId      = null;
 
-// ==== Получить список комнат ====
-app.get('/api/rooms', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('rooms')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    console.error('GET /api/rooms error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+    // ===== Вход в комнату =====
+    socket.on('join', async ({ roomId, userData }) => {
+      try {
+        currentRoom = roomId;
+        userId      = userData.id;
+        socket.join(roomId);
 
-// ==== Получить комнату по ID ====
-app.get('/api/rooms/:id', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('rooms')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    console.error('GET /api/rooms/:id error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+        // --- Участник вошёл в комнату ---
+        await supabase.from('room_members')
+          .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] });
+        const { data: members } = await supabase
+          .from('room_members')
+          .select('user_id')
+          .eq('room_id', roomId);
+        io.to(roomId).emit('members', members);
 
-// ==== Создать комнату ====
-// Теперь ownerId принимается из req.body (userId создателя)
-app.post('/api/rooms', async (req, res) => {
-  try {
-    const { title, movieId, ownerId } = req.body;
-    const id = Math.random().toString(36).substring(2, 11);
+        io.to(roomId).emit('system_message', {
+          text:       `Человек вошёл в комнату`,
+          created_at: new Date().toISOString()
+        });
 
-    const { error: insertError } = await supabase
-      .from('rooms')
-      .insert([{
-        id,
-        title:    title || 'Без названия',
-        movie_id: movieId,
-        viewers:  1,
-        owner_id: ownerId // Сохраняем владельца комнаты!
-      }]);
-    if (insertError) throw insertError;
+        const { data: messages } = await supabase
+          .from('messages')
+          .select('author, text, created_at')
+          .eq('room_id', roomId)
+          .order('created_at', { ascending: true });
+        socket.emit('history', messages);
 
-    const { data: newRoom, error: selErr } = await supabase
-      .from('rooms')
-      .select('*')
-      .eq('id', id)
-      .single();
-    if (selErr) throw selErr;
+        // --- Определяем owner комнаты ---
+        let ownerId = null;
+        // 1. Сначала — глобальный state
+        if (roomsState[roomId] && roomsState[roomId].ownerId) {
+          ownerId = roomsState[roomId].ownerId;
+        } else {
+          // 2. Потом — таблица rooms
+          const { data: room } = await supabase
+            .from('rooms')
+            .select('owner_id')
+            .eq('id', roomId)
+            .single();
+          ownerId = room?.owner_id || userId; // fallback на первого вошедшего
+          if (!roomsState[roomId]) roomsState[roomId] = {};
+          roomsState[roomId].ownerId = ownerId;
+        }
 
-    io.emit('room_created', newRoom);
-    res.json({ id });
-  } catch (err) {
-    console.error('POST /api/rooms error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+        // Отправляем только что вошедшему sync_state с owner_id
+        const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now(), ownerId };
+        socket.emit('sync_state', {
+          position:  state.time,
+          is_paused: !state.playing,
+          speed:     state.speed,
+          updatedAt: state.updatedAt || Date.now(),
+          owner_id:  state.ownerId
+        });
+      } catch (err) {
+        console.error('Socket join error:', err.message);
+      }
+    });
 
-// ==== Сообщения чата ====
-app.get('/api/messages/:roomId', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('author, text, created_at')
-      .eq('room_id', req.params.roomId)
-      .order('created_at', { ascending: true });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    console.error('GET /api/messages error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+    // ===== Синхронизация плеера (play/pause/seek) =====
+    socket.on('player_action', ({ roomId, position, is_paused, speed, updatedAt, userId }) => {
+      // Только owner может управлять плеером!
+      const ownerId = roomsState[roomId]?.ownerId;
+      if (!ownerId || userId !== ownerId) {
+        return; // Игнорируем не-owner'ов
+      }
+      const prev = roomsState[roomId] || {};
+      if (prev.updatedAt && updatedAt && prev.updatedAt > updatedAt) {
+        return;
+      }
+      roomsState[roomId] = {
+        time:      position,
+        playing:   !is_paused,
+        speed:     speed || 1,
+        updatedAt: updatedAt || Date.now(),
+        ownerId:   ownerId
+      };
+      // Отправляем состояние всем (owner_id всегда явно)
+      socket.to(roomId).emit('player_update', {
+        position,
+        is_paused,
+        speed: speed || 1,
+        updatedAt: roomsState[roomId].updatedAt,
+        owner_id:  ownerId
+      });
+    });
 
-app.post('/api/messages', async (req, res) => {
-  try {
-    const { room_id, author, text } = req.body;
-    const { error } = await supabase
-      .from('messages')
-      .insert([{ room_id, author, text }]);
-    if (error) throw error;
-    res.json({ status: 'ok' });
-  } catch (err) {
-    console.error('POST /api/messages error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+    // ===== Получить актуальное состояние (после reconnection/request) =====
+    socket.on('request_state', ({ roomId }) => {
+      const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now() };
+      socket.emit('sync_state', {
+        position:  state.time,
+        is_paused: !state.playing,
+        speed:     state.speed,
+        updatedAt: state.updatedAt,
+        owner_id:  state.ownerId
+      });
+    });
 
-// ==== SPA (Single Page App) fallback ====
-app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
-  const index = path.join(__dirname, 'index.html');
-  if (fs.existsSync(index)) return res.sendFile(index);
-  res.status(404).send('index.html not found');
-});
+    // ====== Чат ======
+    socket.on('chat_message', async msg => {
+      try {
+        await supabase.from('messages').insert([{
+          room_id: msg.roomId,
+          author:  msg.author,
+          text:    msg.text
+        }]);
+        io.to(msg.roomId).emit('chat_message', {
+          author:     msg.author,
+          text:       msg.text,
+          created_at: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error('chat_message error:', err.message);
+      }
+    });
 
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: [
-      'https://kino-fhwp.onrender.com',
-      'https://dsgsasd.ru',
-      'https://www.dsgsasd.ru',
-      'https://web.telegram.org'
-    ],
-    methods: ['GET','POST'],
-    credentials: true
-  }
-});
+    // ===== Отключение =====
+    socket.on('disconnect', async () => {
+      try {
+        if (!currentRoom || !userId) return;
+        await supabase.from('room_members')
+          .delete()
+          .match({ room_id: currentRoom, user_id: userId });
+        const { data: members } = await supabase
+          .from('room_members')
+          .select('user_id')
+          .eq('room_id', currentRoom);
+        io.to(currentRoom).emit('members', members);
 
-// ==== Подключение realtime.js для socket.io (логика комнат) ====
-require('./realtime')(io);
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+        io.to(currentRoom).emit('system_message', {
+          text:       `Человек вышел из комнаты`,
+          created_at: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error('disconnect error:', err.message);
+      }
+    });
+  });
+};

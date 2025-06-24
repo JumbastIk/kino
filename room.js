@@ -1,4 +1,4 @@
-// room.js?v=2.0.10000001
+// room.js?v=2.0.10000002
 
 const BACKEND = (location.hostname.includes('localhost'))
   ? 'http://localhost:3000'
@@ -37,8 +37,7 @@ socket.on('members', members => {
 });
 
 // =========== Чат ===========
-
-socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
+socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
 socket.on('history', data => {
@@ -61,15 +60,18 @@ function sendMessage() {
 
 // =========== Плеер и только у owner управление ===========
 
-socket.on('sync_state', ({ position = 0, is_paused, updatedAt = 0, owner_id }) => {
-  // --- главное изменение: fallback на себя если owner_id нет ---
-  if (owner_id) {
-    ownerId = owner_id;
+function updateOwnerState(newOwnerId) {
+  // Главное: если owner_id отсутствует — делаем owner себя!
+  if (newOwnerId) {
+    ownerId = newOwnerId;
   } else if (!ownerId) {
     ownerId = myUserId;
   }
   iAmOwner = (myUserId === ownerId);
+}
 
+socket.on('sync_state', ({ position = 0, is_paused, updatedAt = 0, owner_id }) => {
+  updateOwnerState(owner_id);
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
   if (!player) return;
@@ -78,15 +80,8 @@ socket.on('sync_state', ({ position = 0, is_paused, updatedAt = 0, owner_id }) =
   is_paused ? player.pause() : player.play().catch(() => {});
   setTimeout(() => isRemoteAction = false, 200);
 });
-
 socket.on('player_update', ({ position = 0, is_paused, updatedAt = 0, owner_id }) => {
-  if (owner_id) {
-    ownerId = owner_id;
-  } else if (!ownerId) {
-    ownerId = myUserId;
-  }
-  iAmOwner = (myUserId === ownerId);
-
+  updateOwnerState(owner_id);
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
   if (!player) return;
@@ -106,13 +101,8 @@ async function fetchRoom() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
 
-    // --- Главное изменение здесь! ---
-    if (roomData.owner_id) {
-      ownerId = roomData.owner_id;
-    } else {
-      ownerId = myUserId;
-    }
-    iAmOwner = (myUserId === ownerId);
+    // Главное: корректно назначаем ownerId
+    updateOwnerState(roomData.owner_id);
 
     const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
