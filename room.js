@@ -1,6 +1,6 @@
 // room.js
 
-const BACKEND = window.location.hostname.includes('localhost')
+const BACKEND = (location.hostname.includes('localhost'))
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
@@ -9,7 +9,7 @@ const socket = io(BACKEND, {
   transports: ['websocket']
 });
 
-const params = new URLSearchParams(window.location.search);
+const params = new URLSearchParams(location.search);
 const roomId = params.get('roomId');
 if (!roomId) {
   alert('Не указан ID комнаты.');
@@ -26,17 +26,16 @@ const sendBtn       = document.getElementById('sendBtn');
 let player, isSeeking = false, isRemoteAction = false;
 
 // ====== ПОДКЛЮЧЕНИЕ ГОЛОСОВОГО ЧАТА ======
-if (typeof window.setupWebRTC === "function") {
-  window.setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
+if (typeof setupWebRTC === "function") {
+  setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
 }
 
 // ====== ПОДКЛЮЧЕНИЕ ТЕКСТОВОГО ЧАТА ======
-if (typeof window.setupChat === "function") {
-  window.setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
+if (typeof setupChat === "function") {
+  setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
 }
 
 // =========== Всё остальное: UI, плеер, синхронизация ===========
-
 socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
@@ -76,7 +75,7 @@ async function fetchRoom() {
     const roomData = await res.json();
 
     // movies должен быть определён через data.js до этого файла!
-    const movie = window.movies.find(m => m.id === roomData.movie_id);
+    const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
@@ -103,7 +102,7 @@ async function fetchRoom() {
     };
 
     const v = document.getElementById('videoPlayer');
-    if (window.Hls && window.Hls.isSupported()) {
+    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
