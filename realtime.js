@@ -18,6 +18,7 @@ module.exports = function(io) {
         // --- Участник вошёл в комнату ---
         await supabase.from('room_members')
           .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] });
+
         const { data: members } = await supabase
           .from('room_members')
           .select('user_id')
@@ -49,8 +50,8 @@ module.exports = function(io) {
             .eq('id', roomId)
             .single();
 
-          // ЕСЛИ owner_id отсутствует в таблице — присваиваем owner текущего юзера и пишем в БД
           if (!room?.owner_id) {
+            // ЕСЛИ owner_id отсутствует — присваиваем owner текущего юзера и пишем в БД
             ownerId = userId;
             await supabase
               .from('rooms')
@@ -63,13 +64,21 @@ module.exports = function(io) {
           roomsState[roomId].ownerId = ownerId;
         }
 
+        // ====== Важное! Если в памяти нет state — инициализируем ======
+        if (!roomsState[roomId].updatedAt) {
+          roomsState[roomId].time      = 0;
+          roomsState[roomId].playing   = false;
+          roomsState[roomId].speed     = 1;
+          roomsState[roomId].updatedAt = Date.now();
+        }
+
         // Отправляем только что вошедшему sync_state с owner_id
-        const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now(), ownerId };
+        const state = roomsState[roomId];
         socket.emit('sync_state', {
           position:  state.time,
           is_paused: !state.playing,
           speed:     state.speed,
-          updatedAt: state.updatedAt || Date.now(),
+          updatedAt: state.updatedAt,
           owner_id:  state.ownerId
         });
       } catch (err) {
@@ -81,13 +90,14 @@ module.exports = function(io) {
     socket.on('player_action', ({ roomId, position, is_paused, speed, updatedAt, userId }) => {
       // Только owner может управлять плеером!
       const ownerId = roomsState[roomId]?.ownerId;
-      if (!ownerId || userId !== ownerId) {
-        return; // Игнорируем не-owner'ов
-      }
+      if (!ownerId || userId !== ownerId) return;
+
       const prev = roomsState[roomId] || {};
-      if (prev.updatedAt && updatedAt && prev.updatedAt > updatedAt) {
+      if (prev.updatedAt && updatedAt && prev.updatedAt >= updatedAt) {
         return;
       }
+
+      // ===== Сохраняем только если реально изменилось =====
       roomsState[roomId] = {
         time:      position,
         playing:   !is_paused,
@@ -95,7 +105,8 @@ module.exports = function(io) {
         updatedAt: updatedAt || Date.now(),
         ownerId:   ownerId
       };
-      // Отправляем состояние всем (owner_id всегда явно)
+
+      // Шлём только не-owner'ам (owner не получает лишние обновления)
       socket.to(roomId).emit('player_update', {
         position,
         is_paused,
@@ -107,7 +118,7 @@ module.exports = function(io) {
 
     // ===== Получить актуальное состояние (после reconnection/request) =====
     socket.on('request_state', ({ roomId }) => {
-      const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now() };
+      const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now(), ownerId: null };
       socket.emit('sync_state', {
         position:  state.time,
         is_paused: !state.playing,

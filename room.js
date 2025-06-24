@@ -1,5 +1,3 @@
-// room.js
-
 const BACKEND = (location.hostname.includes('localhost'))
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
@@ -28,10 +26,32 @@ let lastUpdate = 0;
 let ownerId = null;
 let iAmOwner = false;
 let myUserId = null;
-let initialSync = null; // чтобы хранить sync_state при входе
-let syncTimeout = null; // для debounce
+let initialSync = null;
+let syncTimeout = null;
 
-// =========== Присваиваем свой socket id как user id ===========
+// --- Функция для обновления owner_id в базе через бекенд ---
+async function setOwnerIdInDb(roomId, ownerId) {
+  try {
+    await fetch(`${BACKEND}/api/rooms/${roomId}/set_owner`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner_id: ownerId })
+    });
+  } catch (err) {
+    console.warn('[setOwnerIdInDb] Не удалось обновить owner_id в БД:', err);
+  }
+}
+
+function updateOwnerState(newOwnerId) {
+  if (newOwnerId) {
+    ownerId = newOwnerId;
+  } else if (!ownerId && myUserId) {
+    ownerId = myUserId;
+    setOwnerIdInDb(roomId, ownerId);
+  }
+  iAmOwner = (myUserId === ownerId);
+}
+
 socket.on('connect', () => {
   myUserId = socket.id;
   joinAndRequestState();
@@ -69,36 +89,12 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// =========== Синхронизация плеера и owner ===========
-function updateOwnerState(newOwnerId) {
-  if (newOwnerId) {
-    ownerId = newOwnerId;
-  } else if (!ownerId && myUserId) {
-    ownerId = myUserId;
-    setOwnerIdInDb(roomId, ownerId);
-  }
-  iAmOwner = (myUserId === ownerId);
-}
-
-// --- Функция для обновления owner_id в базе через бекенд ---
-async function setOwnerIdInDb(roomId, ownerId) {
-  try {
-    await fetch(`${BACKEND}/api/rooms/${roomId}/set_owner`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ owner_id: ownerId })
-    });
-  } catch (err) {
-    console.warn('[setOwnerIdInDb] Не удалось обновить owner_id в БД:', err);
-  }
-}
-
-// --- Дебаунсим обновления плеера, чтобы не было кучи seek ---
+// --- Основная синхронизация: только если реально требуется ---
 function debouncedSync(position, is_paused, updatedAt, owner_id) {
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     syncPlayer(position, is_paused, updatedAt, owner_id);
-  }, 100); // задержка 100мс, чтобы "проглотить" частые события
+  }, 100);
 }
 
 function syncPlayer(position, is_paused, updatedAt, owner_id) {
@@ -106,21 +102,32 @@ function syncPlayer(position, is_paused, updatedAt, owner_id) {
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
   if (!player) return;
+
   isRemoteAction = true;
-  if (Math.abs(player.currentTime - position) > 0.4) {
+
+  // Делаем seek только если реальная разница
+  if (Math.abs(player.currentTime - position) > 0.7 && player.readyState > 0) {
     player.currentTime = position;
   }
-  if (is_paused) {
-    if (!player.paused) player.pause();
-  } else {
-    if (player.paused) player.play().catch(()=>{});
+
+  // Только если отличается состояние
+  if (is_paused && !player.paused) {
+    player.pause();
   }
-  setTimeout(() => isRemoteAction = false, 200);
+  if (!is_paused && player.paused) {
+    player.play().catch(() => {
+      // Показываем подсказку только 1 раз
+      if (!window.__autoplayWarned) {
+        window.__autoplayWarned = true;
+        alert('Разрешите автозапуск, кликнув по видео.');
+      }
+    });
+  }
+  setTimeout(() => isRemoteAction = false, 120);
 }
 
 // --- Слушаем все события синхронизации всегда (и owner, и не-owner) ---
 socket.on('sync_state', data => {
-  // Если плеер ещё не создан — запомним стартовое состояние
   if (!player) {
     initialSync = data;
   } else {
@@ -194,15 +201,16 @@ async function fetchRoom() {
     v.addEventListener('loadedmetadata', () => {
       if (initialSync) {
         isRemoteAction = true;
-        if (Math.abs(v.currentTime - initialSync.position) > 0.4) {
+        if (Math.abs(v.currentTime - initialSync.position) > 0.7) {
           v.currentTime = initialSync.position;
         }
-        if (initialSync.is_paused) {
+        if (initialSync.is_paused && !v.paused) {
           v.pause();
-        } else {
-          v.play().catch(()=>{});
         }
-        setTimeout(() => isRemoteAction = false, 200);
+        if (!initialSync.is_paused && v.paused) {
+          v.play().catch(() => {});
+        }
+        setTimeout(() => isRemoteAction = false, 120);
         initialSync = null;
       }
     });
@@ -227,7 +235,7 @@ async function fetchRoom() {
     v.addEventListener('pause', e => {
       if (!iAmOwner) {
         e.preventDefault();
-        v.play().catch(()=>{});
+        if (!v.paused) v.pause();
         return false;
       }
       if (iAmOwner && !isSeeking && !isRemoteAction) {
@@ -252,17 +260,13 @@ async function fetchRoom() {
           userId: myUserId
         });
       }
-      setTimeout(() => isSeeking = false, 200);
+      setTimeout(() => isSeeking = false, 120);
     });
 
     // --- Для не-owner блокируем управление полностью ---
     if (!iAmOwner) {
       v.controls = false;
-      // Отключаем клики, пробелы, хоткеи, wheel
-      v.addEventListener('click', e => e.preventDefault());
-      v.addEventListener('keydown', e => e.preventDefault());
-      v.addEventListener('mousedown', e => e.preventDefault());
-      v.addEventListener('wheel', e => e.preventDefault());
+      v.style.pointerEvents = 'none'; // полностью блокируем любые события мыши/клавиатуры
     }
 
     player = v;
