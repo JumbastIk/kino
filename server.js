@@ -1,140 +1,156 @@
-require('dotenv').config();
-const http      = require('http');
-const express   = require('express');
-const { Server } = require('socket.io');
-const cors      = require('cors');
-const path      = require('path');
-const fs        = require('fs');
-const supabase  = require('./supabase');
-const setupRealtime = require('./realtime'); // <--- добавляешь сюда импорт
+import { setupWebRTC } from './webrtc.js';
+import { setupChat } from './chat.js';
+import './data.js'; // чтобы movies был глобально (или импортируй movies)
 
-const app = express();
+const BACKEND = window.location.hostname.includes('localhost')
+  ? 'http://localhost:3000'
+  : 'https://kino-fhwp.onrender.com';
 
-app.use(cors({
-  origin: [
-    'https://kino-fhwp.onrender.com',
-    'https://dsgsasd.ru',
-    'https://www.dsgsasd.ru',
-    'https://web.telegram.org'
-  ],
-  methods: ['GET','POST','OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-  credentials: true
-}));
-app.options('*', cors());
+const socket = io(BACKEND, {
+  path: '/socket.io',
+  transports: ['websocket']
+});
 
-app.use(express.json());
-app.use(express.static(__dirname));
+const params = new URLSearchParams(window.location.search);
+const roomId = params.get('roomId');
+if (!roomId) {
+  alert('Не указан ID комнаты.');
+  location.href = 'index.html';
+}
 
-app.get('/api/rooms', async (req, res) => {
+const playerWrapper = document.getElementById('playerWrapper');
+const backLink      = document.getElementById('backLink');
+const messagesBox   = document.getElementById('messages');
+const membersList   = document.getElementById('membersList');
+const msgInput      = document.getElementById('msgInput');
+const sendBtn       = document.getElementById('sendBtn');
+
+let player, isSeeking = false, isRemoteAction = false;
+
+// ====== Голосовой чат ======
+setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
+
+// ====== Текстовый чат ======
+setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
+
+// =========== UI, плеер, синхронизация ===========
+
+socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
+socket.emit('request_state', { roomId });
+
+socket.on('sync_state', applySyncState);
+socket.on('player_update', applySyncState);
+
+function applySyncState({ position = 0, is_paused }) {
+  if (!player) return;
+  isRemoteAction = true;
+  isSeeking = true;
+  player.currentTime = position;
+  if (is_paused) {
+    player.pause();
+  } else {
+    player.play().catch(() => {});
+  }
+  setTimeout(() => {
+    isRemoteAction = false;
+    isSeeking = false;
+  }, 200);
+}
+
+function createSpinner() {
+  const s = document.createElement('div');
+  s.className = 'buffer-spinner';
+  s.innerHTML =
+    `<div class="double-bounce1"></div>
+    <div class="double-bounce2"></div>`;
+  s.style.display = 'none';
+  return s;
+}
+
+async function fetchRoom() {
   try {
-    const { data, error } = await supabase
-      .from('rooms')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    res.json(data);
+    const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const roomData = await res.json();
+
+    // movies должен быть определён (импортируй data.js выше)
+    const movie = movies.find(m => m.id === roomData.movie_id);
+    if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
+    backLink.href = `${movie.html}?id=${movie.id}`;
+
+    playerWrapper.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.style.position = 'relative';
+    wrap.innerHTML =
+      `<video id="videoPlayer" controls crossorigin="anonymous" playsinline
+             style="width:100%;border-radius:14px"></video>`;
+    const spinner = createSpinner();
+    wrap.appendChild(spinner);
+    playerWrapper.appendChild(wrap);
+
+    const badge = document.createElement('div');
+    badge.className = 'room-id-badge';
+    badge.innerHTML =
+      `<small>ID комнаты:</small>
+      <code>${roomId}</code>
+      <button id="copyRoomId">Копировать</button>`;
+    playerWrapper.after(badge);
+    document.getElementById('copyRoomId').onclick = () => {
+      navigator.clipboard.writeText(roomId);
+      alert('ID комнаты скопирован');
+    };
+
+    const v = document.getElementById('videoPlayer');
+    if (Hls.isSupported()) {
+      const hls = new Hls({ debug: false });
+      hls.loadSource(movie.videoUrl);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        console.error('[HLS] Ошибка:', data);
+        alert('Ошибка загрузки видео');
+      });
+      v.addEventListener('waiting', () => spinner.style.display = 'block');
+      v.addEventListener('playing', () => spinner.style.display = 'none');
+    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = movie.videoUrl;
+    } else {
+      throw new Error('Ваш браузер не поддерживает HLS');
+    }
+
+    v.addEventListener('play', () => {
+      if (isSeeking || isRemoteAction) return;
+      socket.emit('player_action', {
+        roomId,
+        position: v.currentTime,
+        is_paused: false
+      });
+    });
+    v.addEventListener('pause', () => {
+      if (isSeeking || isRemoteAction) return;
+      socket.emit('player_action', {
+        roomId,
+        position: v.currentTime,
+        is_paused: true
+      });
+    });
+    v.addEventListener('seeking', () => { isSeeking = true; });
+    v.addEventListener('seeked', () => {
+      if (!isRemoteAction) {
+        socket.emit('player_action', {
+          roomId,
+          position: v.currentTime,
+          is_paused: v.paused
+        });
+      }
+      setTimeout(() => isSeeking = false, 200);
+    });
+
+    player = v;
+
   } catch (err) {
-    console.error('GET /api/rooms error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[ERROR] Ошибка комнаты:', err);
+    playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
-});
+}
 
-app.get('/api/rooms/:id', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('rooms')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    console.error('GET /api/rooms/:id error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/rooms', async (req, res) => {
-  try {
-    const { title, movieId } = req.body;
-    const id = Math.random().toString(36).substring(2, 11);
-
-    const { error: insertError } = await supabase
-      .from('rooms')
-      .insert([{
-        id,
-        title:    title || 'Без названия',
-        movie_id: movieId,
-        viewers:  1
-      }]);
-    if (insertError) throw insertError;
-
-    const { data: newRoom, error: selErr } = await supabase
-      .from('rooms')
-      .select('*')
-      .eq('id', id)
-      .single();
-    if (selErr) throw selErr;
-
-    io.emit('room_created', newRoom);
-    res.json({ id });
-  } catch (err) {
-    console.error('POST /api/rooms error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/messages/:roomId', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('messages')
-      .select('author, text, created_at')
-      .eq('room_id', req.params.roomId)
-      .order('created_at', { ascending: true });
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    console.error('GET /api/messages error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/messages', async (req, res) => {
-  try {
-    const { room_id, author, text } = req.body;
-    const { error } = await supabase
-      .from('messages')
-      .insert([{ room_id, author, text }]);
-    if (error) throw error;
-    res.json({ status: 'ok' });
-  } catch (err) {
-    console.error('POST /api/messages error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
-  const index = path.join(__dirname, 'index.html');
-  if (fs.existsSync(index)) return res.sendFile(index);
-  res.status(404).send('index.html not found');
-});
-
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: [
-      'https://kino-fhwp.onrender.com',
-      'https://dsgsasd.ru',
-      'https://www.dsgsasd.ru',
-      'https://web.telegram.org'
-    ],
-    methods: ['GET','POST'],
-    credentials: true
-  }
-});
-
-setupRealtime(io); // <--- передаёшь сюда io, и всё
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+fetchRoom();
