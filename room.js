@@ -1,6 +1,4 @@
-// room.js?v=1.0.777312321
-
-const BACKEND = (location.hostname.includes('localhost'))
+const BACKEND = window.location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
@@ -9,7 +7,7 @@ const socket = io(BACKEND, {
   transports: ['websocket']
 });
 
-const params = new URLSearchParams(location.search);
+const params = new URLSearchParams(window.location.search);
 const roomId = params.get('roomId');
 if (!roomId) {
   alert('Не указан ID комнаты.');
@@ -28,7 +26,7 @@ let player, isSeeking = false, isRemoteAction = false;
 // ====== ГОЛОСОВОЙ ЧАТ (Push-to-Talk) ======
 let localStream = null;
 const peers = {};
-let peerIds = []; // Список peer id
+let peerIds = []; // Всегда актуальный список peer id (кроме себя)
 
 // Кнопка микрофона
 const micBtn = document.createElement('button');
@@ -38,18 +36,18 @@ document.querySelector('.chat-input-wrap').appendChild(micBtn);
 
 let isTalking = false;
 
-// --- Члены комнаты ---
+// --- Используем только сокетовые данные об участниках! ---
 socket.on('members', members => {
   peerIds = members.map(m => m.user_id).filter(id => id !== socket.id);
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${members.length}):</div>
     <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
 
-  // Добавляем peer соединения
+  // Добавляем peer соединения к новым участникам
   peerIds.forEach(id => {
     if (!peers[id]) createPeer(id, true);
   });
-  // Удаляем peer'ы вышедших
+  // Удаляем peer'ы тех, кто вышел
   Object.keys(peers).forEach(id => {
     if (!peerIds.includes(id)) {
       peers[id].close();
@@ -134,7 +132,7 @@ async function createPeer(peerId, isOffer) {
   });
   peers[peerId] = pc;
 
-  // Текущий микрофон (если включён)
+  // Подключаем текущий микрофон (если включён)
   if (localStream && isTalking) {
     localStream.getAudioTracks().forEach(track => {
       pc.addTrack(track, localStream);
@@ -166,7 +164,7 @@ async function createPeer(peerId, isOffer) {
   return pc;
 }
 
-// =========== Чат ===========
+// =========== Всё остальное UI, плеер и чат ===========
 
 socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
@@ -188,8 +186,6 @@ function sendMessage() {
   socket.emit('chat_message', { roomId, author: 'Гость', text });
   msgInput.value = '';
 }
-
-// =========== Плеер и синхронизация ===========
 
 socket.on('sync_state', ({ position = 0, is_paused }) => {
   if (!player) return;
@@ -253,7 +249,7 @@ async function fetchRoom() {
     };
 
     const v = document.getElementById('videoPlayer');
-    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    if (Hls.isSupported()) {
       const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
