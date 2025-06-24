@@ -33,13 +33,13 @@ let initialSync = null;
 let syncTimeout = null;
 let controlsLocked = false;  // флаг блокировки управления
 
-// Применить текущее состояние блокировки управления
+// Универсальная функция: показывает/скрывает overlay и включает/выключает controls
 function applyControlsLockUI() {
   if (blocker) {
     blocker.style.display = (!iAmOwner && controlsLocked) ? 'block' : 'none';
   }
   if (player) {
-    player.controls = iAmOwner || !controlsLocked;
+    player.controls = (iAmOwner || !controlsLocked);
   }
 }
 
@@ -143,11 +143,8 @@ function syncPlayer(pos, paus, time, oid){
 }
 
 socket.on('sync_state', d=>{
-  if(!player) {
-    initialSync = d;
-  } else {
-    debouncedSync(d.position,d.is_paused,d.updatedAt,d.owner_id);
-  }
+  if(!player) initialSync = d;
+  else debouncedSync(d.position,d.is_paused,d.updatedAt,d.owner_id);
 });
 socket.on('player_update', d=>{
   debouncedSync(d.position,d.is_paused,d.updatedAt,d.owner_id);
