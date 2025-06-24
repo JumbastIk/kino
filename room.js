@@ -29,13 +29,13 @@ const sendBtn       = document.getElementById('sendBtn');
 let player, isSeeking = false, isRemoteAction = false;
 
 // ====== ПОДКЛЮЧЕНИЕ ГОЛОСОВОГО ЧАТА ======
-if (typeof setupWebRTC === "function") {
-  setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
+if (typeof window.setupWebRTC === "function") {
+  window.setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
 }
 
 // ====== ПОДКЛЮЧЕНИЕ ТЕКСТОВОГО ЧАТА ======
-if (typeof setupChat === "function") {
-  setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
+if (typeof window.setupChat === "function") {
+  window.setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
 }
 
 // =========== Всё остальное: UI, плеер, синхронизация ===========

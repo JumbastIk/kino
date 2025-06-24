@@ -1,6 +1,7 @@
 // chat.js
 
-export function setupChat({ socket, roomId, messagesBox, msgInput, sendBtn }) {
+// Глобально объявляем setupChat
+window.setupChat = function({ socket, roomId, messagesBox, msgInput, sendBtn }) {
   // === История, сообщения, системные сообщения ===
   socket.on('history', data => {
     messagesBox.innerHTML = '';

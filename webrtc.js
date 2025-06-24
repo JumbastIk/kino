@@ -1,6 +1,6 @@
 // webrtc.js
 
-export function setupWebRTC({ socket, roomId, membersListSelector = '#membersList', micBtnParent = '.chat-input-wrap' }) {
+window.setupWebRTC = function({ socket, roomId, membersListSelector = '#membersList', micBtnParent = '.chat-input-wrap' }) {
   // --- Стартовые значения и DOM ---
   let localStream = null;
   const peers = {};
