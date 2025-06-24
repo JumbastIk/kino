@@ -1,4 +1,4 @@
-const supabase = require('./supabase'); // если нужен
+const supabase = require('./supabase');
 
 const roomsState = {};
 
@@ -7,6 +7,7 @@ module.exports = function(io) {
     let currentRoom = null;
     let userId      = null;
 
+    // Новый пользователь заходит в комнату
     socket.on('join', async ({ roomId, userData }) => {
       try {
         currentRoom = roomId;
@@ -18,7 +19,7 @@ module.exports = function(io) {
           .from('room_members')
           .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] });
 
-        // Отправляем обновлённый список
+        // Обновлённый список участников
         const { data: members } = await supabase
           .from('room_members')
           .select('user_id')
@@ -39,18 +40,20 @@ module.exports = function(io) {
           .order('created_at', { ascending: true });
         socket.emit('history', messages);
 
-        // Синхронизируем плеер
-        const state = roomsState[roomId] || { time: 0, playing: false, speed: 1 };
+        // Критически важно: СРАЗУ отправляем sync_state нового пользователя
+        const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now() };
         socket.emit('sync_state', {
           position:  state.time,
           is_paused: !state.playing,
-          speed:     state.speed
+          speed:     state.speed,
+          updatedAt: state.updatedAt
         });
       } catch (err) {
         console.error('Socket join error:', err.message);
       }
     });
 
+    // Чат
     socket.on('chat_message', async msg => {
       try {
         await supabase.from('messages').insert([{
@@ -68,25 +71,45 @@ module.exports = function(io) {
       }
     });
 
+    // События управления плеером (play/pause/seek)
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
-      roomsState[roomId] = {
-        time:       position,
-        playing:    !is_paused,
-        speed,
-        lastUpdate: Date.now()
-      };
-      socket.to(roomId).emit('player_update', { position, is_paused, speed });
+      // Проверяем был ли реально сдвиг
+      const prev = roomsState[roomId] || {};
+      const isChanged = (
+        prev.time !== position ||
+        prev.playing !== !is_paused ||
+        prev.speed !== speed
+      );
+      // Обновляем только если реально что-то поменялось
+      if (isChanged) {
+        roomsState[roomId] = {
+          time:       position,
+          playing:    !is_paused,
+          speed:      speed || 1,
+          updatedAt:  Date.now()
+        };
+        // Шлём ВСЕМ кроме инициатора
+        socket.to(roomId).emit('player_update', {
+          position,
+          is_paused,
+          speed: speed || 1,
+          updatedAt: roomsState[roomId].updatedAt
+        });
+      }
     });
 
+    // Новый участник, или сбой — всегда можно запросить актуальное состояние
     socket.on('request_state', ({ roomId }) => {
-      const state = roomsState[roomId] || { time: 0, playing: false, speed: 1 };
+      const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now() };
       socket.emit('sync_state', {
         position:  state.time,
         is_paused: !state.playing,
-        speed:     state.speed
+        speed:     state.speed,
+        updatedAt: state.updatedAt
       });
     });
 
+    // При отключении пользователя
     socket.on('disconnect', async () => {
       try {
         if (!currentRoom || !userId) return;
@@ -97,7 +120,7 @@ module.exports = function(io) {
           .delete()
           .match({ room_id: currentRoom, user_id: userId });
 
-        // Новый список
+        // Новый список участников
         const { data: members } = await supabase
           .from('room_members')
           .select('user_id')

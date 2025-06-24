@@ -22,13 +22,13 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player, isSeeking = false, isRemoteAction = false;
+let lastPlayerUpdate = 0; // Для защиты от старых событий
 
 // ====== ГОЛОСОВОЙ ЧАТ (Push-to-Talk) ======
 let localStream = null;
 const peers = {};
 let peerIds = []; // Всегда актуальный список peer id (кроме себя)
 
-// Кнопка микрофона
 const micBtn = document.createElement('button');
 micBtn.textContent = '🎤';
 micBtn.className = 'mic-btn';
@@ -36,18 +36,15 @@ document.querySelector('.chat-input-wrap').appendChild(micBtn);
 
 let isTalking = false;
 
-// --- Используем только сокетовые данные об участниках! ---
 socket.on('members', members => {
   peerIds = members.map(m => m.user_id).filter(id => id !== socket.id);
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${members.length}):</div>
     <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
 
-  // Добавляем peer соединения к новым участникам
   peerIds.forEach(id => {
     if (!peers[id]) createPeer(id, true);
   });
-  // Удаляем peer'ы тех, кто вышел
   Object.keys(peers).forEach(id => {
     if (!peerIds.includes(id)) {
       peers[id].close();
@@ -132,7 +129,6 @@ async function createPeer(peerId, isOffer) {
   });
   peers[peerId] = pc;
 
-  // Подключаем текущий микрофон (если включён)
   if (localStream && isTalking) {
     localStream.getAudioTracks().forEach(track => {
       pc.addTrack(track, localStream);
@@ -187,24 +183,31 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-socket.on('sync_state', ({ position = 0, is_paused }) => {
+// ========== СИНХРОНИЗАЦИЯ ПЛЕЕРА ==========
+
+socket.on('sync_state', handlePlayerSync);
+socket.on('player_update', handlePlayerSync);
+
+function handlePlayerSync({ position = 0, is_paused, updatedAt }) {
   if (!player) return;
-  isRemoteAction = true;
-  player.currentTime = position;
-  is_paused ? player.pause() : player.play().catch(() => {});
-  setTimeout(() => isRemoteAction = false, 200);
-});
-socket.on('player_update', ({ position = 0, is_paused }) => {
-  if (!player) return;
+  if (typeof updatedAt !== 'number') updatedAt = Date.now();
+  // Обрабатываем только самые свежие события
+  if (updatedAt < lastPlayerUpdate) return;
+  lastPlayerUpdate = updatedAt;
+
   isRemoteAction = true;
   isSeeking = true;
   player.currentTime = position;
-  is_paused ? player.pause() : player.play().catch(() => {});
+  if (is_paused) {
+    player.pause();
+  } else {
+    player.play().catch(() => {});
+  }
   setTimeout(() => {
-    isSeeking = false;
     isRemoteAction = false;
+    isSeeking = false;
   }, 200);
-});
+}
 
 function createSpinner() {
   const s = document.createElement('div');
