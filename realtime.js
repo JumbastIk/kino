@@ -3,11 +3,6 @@ const supabase = require('./supabase');
 // Глобальное состояние для всех комнат (player sync + owner)
 const roomsState = {}; // { [roomId]: { time, playing, speed, updatedAt, ownerId } }
 
-/**
- * updatedAt — время последнего sync, для защиты от race conditions
- * ownerId — user_id владельца комнаты (создателя)
- */
-
 module.exports = function(io) {
   io.on('connection', socket => {
     let currentRoom = null;
@@ -53,7 +48,17 @@ module.exports = function(io) {
             .select('owner_id')
             .eq('id', roomId)
             .single();
-          ownerId = room?.owner_id || userId; // fallback на первого вошедшего
+
+          // ЕСЛИ owner_id отсутствует в таблице — присваиваем owner текущего юзера и пишем в БД
+          if (!room?.owner_id) {
+            ownerId = userId;
+            await supabase
+              .from('rooms')
+              .update({ owner_id: userId })
+              .eq('id', roomId);
+          } else {
+            ownerId = room.owner_id;
+          }
           if (!roomsState[roomId]) roomsState[roomId] = {};
           roomsState[roomId].ownerId = ownerId;
         }
