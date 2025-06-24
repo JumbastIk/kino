@@ -22,7 +22,6 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player, isSeeking = false, isRemoteAction = false;
-let lastPlayerUpdate = 0; // Для защиты от старых событий
 
 // ====== ГОЛОСОВОЙ ЧАТ (Push-to-Talk) ======
 let localStream = null;
@@ -183,18 +182,13 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// ========== СИНХРОНИЗАЦИЯ ПЛЕЕРА ==========
+// ========== ПРИЁМ sync_state и player_update, отправка player_action ==========
 
-socket.on('sync_state', handlePlayerSync);
-socket.on('player_update', handlePlayerSync);
+socket.on('sync_state', applySyncState);
+socket.on('player_update', applySyncState);
 
-function handlePlayerSync({ position = 0, is_paused, updatedAt }) {
+function applySyncState({ position = 0, is_paused }) {
   if (!player) return;
-  if (typeof updatedAt !== 'number') updatedAt = Date.now();
-  // Обрабатываем только самые свежие события
-  if (updatedAt < lastPlayerUpdate) return;
-  lastPlayerUpdate = updatedAt;
-
   isRemoteAction = true;
   isSeeking = true;
   player.currentTime = position;
