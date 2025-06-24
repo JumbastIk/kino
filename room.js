@@ -62,9 +62,14 @@ function sendMessage() {
 // =========== Плеер и только у owner управление ===========
 
 socket.on('sync_state', ({ position = 0, is_paused, updatedAt = 0, owner_id }) => {
-  // обновим owner_id (на случай если поменялся)
-  if (owner_id) ownerId = owner_id;
+  // --- главное изменение: fallback на себя если owner_id нет ---
+  if (owner_id) {
+    ownerId = owner_id;
+  } else if (!ownerId) {
+    ownerId = myUserId;
+  }
   iAmOwner = (myUserId === ownerId);
+
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
   if (!player) return;
@@ -73,9 +78,15 @@ socket.on('sync_state', ({ position = 0, is_paused, updatedAt = 0, owner_id }) =
   is_paused ? player.pause() : player.play().catch(() => {});
   setTimeout(() => isRemoteAction = false, 200);
 });
+
 socket.on('player_update', ({ position = 0, is_paused, updatedAt = 0, owner_id }) => {
-  if (owner_id) ownerId = owner_id;
+  if (owner_id) {
+    ownerId = owner_id;
+  } else if (!ownerId) {
+    ownerId = myUserId;
+  }
   iAmOwner = (myUserId === ownerId);
+
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
   if (!player) return;
@@ -95,8 +106,12 @@ async function fetchRoom() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
 
-    // Получаем owner_id
-    ownerId = roomData.owner_id;
+    // --- Главное изменение здесь! ---
+    if (roomData.owner_id) {
+      ownerId = roomData.owner_id;
+    } else {
+      ownerId = myUserId;
+    }
     iAmOwner = (myUserId === ownerId);
 
     const movie = movies.find(m => m.id === roomData.movie_id);
