@@ -1,4 +1,4 @@
-// room.js?v=1.0.777312321
+// room.js?v=1.0.88888888
 
 const BACKEND = (location.hostname.includes('localhost'))
   ? 'http://localhost:3000'
@@ -24,13 +24,13 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player, isSeeking = false, isRemoteAction = false;
+let lastUpdate = 0; // <--- Самое главное! timestamp последнего sync/player_update
 
 // ====== ГОЛОСОВОЙ ЧАТ (Push-to-Talk) ======
 let localStream = null;
 const peers = {};
-let peerIds = []; // Список peer id
+let peerIds = [];
 
-// Кнопка микрофона
 const micBtn = document.createElement('button');
 micBtn.textContent = '🎤';
 micBtn.className = 'mic-btn';
@@ -38,18 +38,14 @@ document.querySelector('.chat-input-wrap').appendChild(micBtn);
 
 let isTalking = false;
 
-// --- Члены комнаты ---
 socket.on('members', members => {
   peerIds = members.map(m => m.user_id).filter(id => id !== socket.id);
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${members.length}):</div>
     <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
-
-  // Добавляем peer соединения
   peerIds.forEach(id => {
     if (!peers[id]) createPeer(id, true);
   });
-  // Удаляем peer'ы вышедших
   Object.keys(peers).forEach(id => {
     if (!peerIds.includes(id)) {
       peers[id].close();
@@ -60,7 +56,6 @@ socket.on('members', members => {
   });
 });
 
-// --- Push-to-Talk микрофон ---
 micBtn.addEventListener('mousedown', async () => {
   if (isTalking) return;
   isTalking = true;
@@ -110,7 +105,6 @@ function removeAudioTracksFromPeers() {
   }
 }
 
-// --- WebRTC handshake ---
 socket.on('new_peer', async ({ from }) => {
   if (from === socket.id) return;
   if (!peers[from]) await createPeer(from, false);
@@ -133,20 +127,16 @@ async function createPeer(peerId, isOffer) {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   });
   peers[peerId] = pc;
-
-  // Текущий микрофон (если включён)
   if (localStream && isTalking) {
     localStream.getAudioTracks().forEach(track => {
       pc.addTrack(track, localStream);
     });
   }
-
   pc.onicecandidate = e => {
     if (e.candidate) {
       socket.emit('signal', { to: peerId, candidate: e.candidate });
     }
   };
-
   pc.ontrack = e => {
     let audio = document.getElementById(`audio_${peerId}`);
     if (!audio) {
@@ -157,7 +147,6 @@ async function createPeer(peerId, isOffer) {
     }
     audio.srcObject = e.streams[0];
   };
-
   if (isOffer) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -167,7 +156,6 @@ async function createPeer(peerId, isOffer) {
 }
 
 // =========== Чат ===========
-
 socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
@@ -191,14 +179,19 @@ function sendMessage() {
 
 // =========== Плеер и синхронизация ===========
 
-socket.on('sync_state', ({ position = 0, is_paused }) => {
+socket.on('sync_state', ({ position = 0, is_paused, updatedAt = 0 }) => {
+  // <-- главное изменение!
+  if (updatedAt < lastUpdate) return;
+  lastUpdate = updatedAt;
   if (!player) return;
   isRemoteAction = true;
   player.currentTime = position;
   is_paused ? player.pause() : player.play().catch(() => {});
   setTimeout(() => isRemoteAction = false, 200);
 });
-socket.on('player_update', ({ position = 0, is_paused }) => {
+socket.on('player_update', ({ position = 0, is_paused, updatedAt = 0 }) => {
+  if (updatedAt < lastUpdate) return;
+  lastUpdate = updatedAt;
   if (!player) return;
   isRemoteAction = true;
   isSeeking = true;
@@ -274,7 +267,8 @@ async function fetchRoom() {
       socket.emit('player_action', {
         roomId,
         position: v.currentTime,
-        is_paused: false
+        is_paused: false,
+        updatedAt: Date.now()
       });
     });
     v.addEventListener('pause', () => {
@@ -282,7 +276,8 @@ async function fetchRoom() {
       socket.emit('player_action', {
         roomId,
         position: v.currentTime,
-        is_paused: true
+        is_paused: true,
+        updatedAt: Date.now()
       });
     });
     v.addEventListener('seeking', () => { isSeeking = true; });
@@ -291,7 +286,8 @@ async function fetchRoom() {
         socket.emit('player_action', {
           roomId,
           position: v.currentTime,
-          is_paused: v.paused
+          is_paused: v.paused,
+          updatedAt: Date.now()
         });
       }
       setTimeout(() => isSeeking = false, 200);

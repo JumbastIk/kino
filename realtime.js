@@ -3,6 +3,11 @@ const supabase = require('./supabase');
 // Глобальное состояние для всех комнат (player sync)
 const roomsState = {};
 
+/**
+ * { time, playing, speed, updatedAt }
+ * updatedAt — время последнего обновления
+ */
+
 module.exports = function(io) {
   io.on('connection', socket => {
     let currentRoom = null;
@@ -15,25 +20,18 @@ module.exports = function(io) {
         userId      = userData.id;
         socket.join(roomId);
 
-        // Обновляем участников
-        await supabase
-          .from('room_members')
+        // --- (оставь как есть) --- //
+        await supabase.from('room_members')
           .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] });
-
-        // Отправляем новый список участников
         const { data: members } = await supabase
           .from('room_members')
           .select('user_id')
           .eq('room_id', roomId);
         io.to(roomId).emit('members', members);
-
-        // Системное сообщение
         io.to(roomId).emit('system_message', {
           text:       `Человек вошёл в комнату`,
           created_at: new Date().toISOString()
         });
-
-        // История чата
         const { data: messages } = await supabase
           .from('messages')
           .select('author, text, created_at')
@@ -55,27 +53,25 @@ module.exports = function(io) {
     });
 
     // ===== Синхронизация плеера (play/pause/seek) =====
-    socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
+    socket.on('player_action', ({ roomId, position, is_paused, speed, updatedAt }) => {
+      // Если событие старше — пропускаем (клиенты всегда должны присылать updatedAt = Date.now())
       const prev = roomsState[roomId] || {};
-      const isChanged =
-        prev.time !== position ||
-        prev.playing !== !is_paused ||
-        prev.speed !== speed;
-      if (isChanged) {
-        roomsState[roomId] = {
-          time:       position,
-          playing:    !is_paused,
-          speed:      speed || 1,
-          updatedAt:  Date.now()
-        };
-        // Всем остальным участникам (кроме инициатора) отправляем новое состояние
-        socket.to(roomId).emit('player_update', {
-          position,
-          is_paused,
-          speed: speed || 1,
-          updatedAt: roomsState[roomId].updatedAt
-        });
+      if (prev.updatedAt && updatedAt && prev.updatedAt > updatedAt) {
+        return;
       }
+      roomsState[roomId] = {
+        time:      position,
+        playing:   !is_paused,
+        speed:     speed || 1,
+        updatedAt: updatedAt || Date.now()
+      };
+      // Отправляем остальным новое состояние с точным временем
+      socket.to(roomId).emit('player_update', {
+        position,
+        is_paused,
+        speed: speed || 1,
+        updatedAt: roomsState[roomId].updatedAt
+      });
     });
 
     // ===== Получить актуальное состояние (после reconnection/request) =====
@@ -111,8 +107,7 @@ module.exports = function(io) {
     socket.on('disconnect', async () => {
       try {
         if (!currentRoom || !userId) return;
-        await supabase
-          .from('room_members')
+        await supabase.from('room_members')
           .delete()
           .match({ room_id: currentRoom, user_id: userId });
         const { data: members } = await supabase
