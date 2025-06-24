@@ -1,4 +1,4 @@
-// room.js
+// room.js?v=1.0.777312321
 
 const BACKEND = (location.hostname.includes('localhost'))
   ? 'http://localhost:3000'
@@ -25,38 +25,190 @@ const sendBtn       = document.getElementById('sendBtn');
 
 let player, isSeeking = false, isRemoteAction = false;
 
-// ====== ПОДКЛЮЧЕНИЕ ГОЛОСОВОГО ЧАТА ======
-if (typeof setupWebRTC === "function") {
-  setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
+// ====== ГОЛОСОВОЙ ЧАТ (Push-to-Talk) ======
+let localStream = null;
+const peers = {};
+let peerIds = []; // Список peer id
+
+// Кнопка микрофона
+const micBtn = document.createElement('button');
+micBtn.textContent = '🎤';
+micBtn.className = 'mic-btn';
+document.querySelector('.chat-input-wrap').appendChild(micBtn);
+
+let isTalking = false;
+
+// --- Члены комнаты ---
+socket.on('members', members => {
+  peerIds = members.map(m => m.user_id).filter(id => id !== socket.id);
+  membersList.innerHTML =
+    `<div class="chat-members-label">Участники (${members.length}):</div>
+    <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
+
+  // Добавляем peer соединения
+  peerIds.forEach(id => {
+    if (!peers[id]) createPeer(id, true);
+  });
+  // Удаляем peer'ы вышедших
+  Object.keys(peers).forEach(id => {
+    if (!peerIds.includes(id)) {
+      peers[id].close();
+      delete peers[id];
+      const audio = document.getElementById(`audio_${id}`);
+      if (audio) audio.remove();
+    }
+  });
+});
+
+// --- Push-to-Talk микрофон ---
+micBtn.addEventListener('mousedown', async () => {
+  if (isTalking) return;
+  isTalking = true;
+  micBtn.classList.add('active');
+  try {
+    if (!localStream) {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+    addAudioTracksToPeers();
+    socket.emit('new_peer', { roomId, from: socket.id });
+  } catch (e) {
+    alert('Нет доступа к микрофону');
+    micBtn.classList.remove('active');
+    isTalking = false;
+  }
+});
+micBtn.addEventListener('mouseup', () => {
+  if (!isTalking) return;
+  isTalking = false;
+  micBtn.classList.remove('active');
+  removeAudioTracksFromPeers();
+});
+micBtn.addEventListener('touchstart', e => {
+  e.preventDefault();
+  micBtn.dispatchEvent(new MouseEvent('mousedown'));
+});
+micBtn.addEventListener('touchend', e => {
+  e.preventDefault();
+  micBtn.dispatchEvent(new MouseEvent('mouseup'));
+});
+
+function addAudioTracksToPeers() {
+  if (!localStream) return;
+  for (const pc of Object.values(peers)) {
+    localStream.getAudioTracks().forEach(track => {
+      pc.addTrack(track, localStream);
+    });
+  }
+}
+function removeAudioTracksFromPeers() {
+  for (const pc of Object.values(peers)) {
+    pc.getSenders().forEach(sender => {
+      if (sender.track && sender.track.kind === 'audio') {
+        pc.removeTrack(sender);
+      }
+    });
+  }
 }
 
-// ====== ПОДКЛЮЧЕНИЕ ТЕКСТОВОГО ЧАТА ======
-if (typeof setupChat === "function") {
-  setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
+// --- WebRTC handshake ---
+socket.on('new_peer', async ({ from }) => {
+  if (from === socket.id) return;
+  if (!peers[from]) await createPeer(from, false);
+});
+socket.on('signal', async ({ from, description, candidate }) => {
+  let pc = peers[from] || await createPeer(from, false);
+  if (description) {
+    await pc.setRemoteDescription(description);
+    if (description.type === 'offer') {
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('signal', { to: from, description: pc.localDescription });
+    }
+  }
+  if (candidate) await pc.addIceCandidate(candidate);
+});
+
+async function createPeer(peerId, isOffer) {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+  peers[peerId] = pc;
+
+  // Текущий микрофон (если включён)
+  if (localStream && isTalking) {
+    localStream.getAudioTracks().forEach(track => {
+      pc.addTrack(track, localStream);
+    });
+  }
+
+  pc.onicecandidate = e => {
+    if (e.candidate) {
+      socket.emit('signal', { to: peerId, candidate: e.candidate });
+    }
+  };
+
+  pc.ontrack = e => {
+    let audio = document.getElementById(`audio_${peerId}`);
+    if (!audio) {
+      audio = document.createElement('audio');
+      audio.id = `audio_${peerId}`;
+      audio.autoplay = true;
+      document.body.appendChild(audio);
+    }
+    audio.srcObject = e.streams[0];
+  };
+
+  if (isOffer) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit('signal', { to: peerId, description: pc.localDescription });
+  }
+  return pc;
 }
 
-// =========== Всё остальное: UI, плеер, синхронизация ===========
+// =========== Чат ===========
+
 socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
-socket.on('sync_state', applySyncState);
-socket.on('player_update', applySyncState);
+socket.on('history', data => {
+  messagesBox.innerHTML = '';
+  data.forEach(m => appendMessage(m.author, m.text));
+});
+socket.on('chat_message', m => appendMessage(m.author, m.text));
+socket.on('system_message', msg => {
+  if (msg && msg.text) appendSystemMessage(msg.text);
+});
 
-function applySyncState({ position = 0, is_paused }) {
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
+function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+  socket.emit('chat_message', { roomId, author: 'Гость', text });
+  msgInput.value = '';
+}
+
+// =========== Плеер и синхронизация ===========
+
+socket.on('sync_state', ({ position = 0, is_paused }) => {
+  if (!player) return;
+  isRemoteAction = true;
+  player.currentTime = position;
+  is_paused ? player.pause() : player.play().catch(() => {});
+  setTimeout(() => isRemoteAction = false, 200);
+});
+socket.on('player_update', ({ position = 0, is_paused }) => {
   if (!player) return;
   isRemoteAction = true;
   isSeeking = true;
   player.currentTime = position;
-  if (is_paused) {
-    player.pause();
-  } else {
-    player.play().catch(() => {});
-  }
+  is_paused ? player.pause() : player.play().catch(() => {});
   setTimeout(() => {
-    isRemoteAction = false;
     isSeeking = false;
+    isRemoteAction = false;
   }, 200);
-}
+});
 
 function createSpinner() {
   const s = document.createElement('div');
@@ -74,7 +226,6 @@ async function fetchRoom() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
 
-    // movies должен быть определён через data.js до этого файла!
     const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
@@ -155,3 +306,19 @@ async function fetchRoom() {
 }
 
 fetchRoom();
+
+function appendMessage(author, text) {
+  const d = document.createElement('div');
+  d.className = 'chat-message';
+  d.innerHTML = `<strong>${author}:</strong> ${text}`;
+  messagesBox.appendChild(d);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+}
+
+function appendSystemMessage(text) {
+  const d = document.createElement('div');
+  d.className = 'chat-message system-message';
+  d.innerHTML = `<em>${text}</em>`;
+  messagesBox.appendChild(d);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+}
