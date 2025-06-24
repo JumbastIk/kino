@@ -1,8 +1,5 @@
 // room.js
 
-// Все функции, переменные и объекты должны быть объявлены глобально (или через window.)
-// Этот файл не содержит import/export!
-
 const BACKEND = window.location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';

@@ -1,7 +1,3 @@
-import { setupWebRTC } from './webrtc.js';
-import { setupChat } from './chat.js';
-import './data.js'; // чтобы movies был глобально (или импортируй movies)
-
 const BACKEND = window.location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
@@ -28,10 +24,14 @@ const sendBtn       = document.getElementById('sendBtn');
 let player, isSeeking = false, isRemoteAction = false;
 
 // ====== Голосовой чат ======
-setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
+if (typeof window.setupWebRTC === "function") {
+  window.setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
+}
 
 // ====== Текстовый чат ======
-setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
+if (typeof window.setupChat === "function") {
+  window.setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
+}
 
 // =========== UI, плеер, синхронизация ===========
 
@@ -73,8 +73,8 @@ async function fetchRoom() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
 
-    // movies должен быть определён (импортируй data.js выше)
-    const movie = movies.find(m => m.id === roomData.movie_id);
+    // movies должен быть определён через data.js до этого файла!
+    const movie = window.movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
@@ -101,7 +101,7 @@ async function fetchRoom() {
     };
 
     const v = document.getElementById('videoPlayer');
-    if (Hls.isSupported()) {
+    if (window.Hls && window.Hls.isSupported()) {
       const hls = new Hls({ debug: false });
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
