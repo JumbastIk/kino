@@ -43,11 +43,11 @@ module.exports = function(io) {
 
         // --- Определяем owner комнаты ---
         let ownerId = null;
-        // 1. Пытаемся взять из state, если уже определён
+        // 1. Сначала — глобальный state
         if (roomsState[roomId] && roomsState[roomId].ownerId) {
           ownerId = roomsState[roomId].ownerId;
         } else {
-          // 2. Если нет — берём из таблицы rooms
+          // 2. Потом — таблица rooms
           const { data: room } = await supabase
             .from('rooms')
             .select('owner_id')
@@ -58,7 +58,7 @@ module.exports = function(io) {
           roomsState[roomId].ownerId = ownerId;
         }
 
-        // Отправляем только что вошедшему sync_state с ownerId
+        // Отправляем только что вошедшему sync_state с owner_id
         const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now(), ownerId };
         socket.emit('sync_state', {
           position:  state.time,
@@ -90,7 +90,7 @@ module.exports = function(io) {
         updatedAt: updatedAt || Date.now(),
         ownerId:   ownerId
       };
-      // Отправляем состояние с owner_id
+      // Отправляем состояние всем (owner_id всегда явно)
       socket.to(roomId).emit('player_update', {
         position,
         is_paused,
