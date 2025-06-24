@@ -1,4 +1,4 @@
-// room.js?v=2.1.0
+// room.js?v=2.0.10000001
 
 const BACKEND = (location.hostname.includes('localhost'))
   ? 'http://localhost:3000'
@@ -26,18 +26,19 @@ const sendBtn       = document.getElementById('sendBtn');
 let player, isSeeking = false, isRemoteAction = false;
 let lastUpdate = 0;
 let ownerId = null;
-let myUserId = socket.id;
 let iAmOwner = false;
+let myUserId = socket.id; // по умолчанию, инициализируется после join
 
-// ==== Участники ====
+// === Участники комнаты ===
 socket.on('members', members => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${members.length}):</div>
     <ul>${members.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
 });
 
-// ==== Чат ====
-socket.emit('join', { roomId, userData: { id: socket.id, first_name: 'Гость' } });
+// =========== Чат ===========
+
+socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
 socket.emit('request_state', { roomId });
 
 socket.on('history', data => {
@@ -58,15 +59,12 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// ==== Обновление статуса owner ====
-function updateOwner(owner_id) {
-  ownerId = owner_id;
-  iAmOwner = (myUserId === ownerId);
-  if (player) updatePlayerControls();
-}
+// =========== Плеер и только у owner управление ===========
 
 socket.on('sync_state', ({ position = 0, is_paused, updatedAt = 0, owner_id }) => {
-  updateOwner(owner_id);
+  // обновим owner_id (на случай если поменялся)
+  if (owner_id) ownerId = owner_id;
+  iAmOwner = (myUserId === ownerId);
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
   if (!player) return;
@@ -76,7 +74,8 @@ socket.on('sync_state', ({ position = 0, is_paused, updatedAt = 0, owner_id }) =
   setTimeout(() => isRemoteAction = false, 200);
 });
 socket.on('player_update', ({ position = 0, is_paused, updatedAt = 0, owner_id }) => {
-  updateOwner(owner_id);
+  if (owner_id) ownerId = owner_id;
+  iAmOwner = (myUserId === ownerId);
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
   if (!player) return;
@@ -96,8 +95,9 @@ async function fetchRoom() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const roomData = await res.json();
 
-    // ownerId и мой статус
-    updateOwner(roomData.owner_id);
+    // Получаем owner_id
+    ownerId = roomData.owner_id;
+    iAmOwner = (myUserId === ownerId);
 
     const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
@@ -142,65 +142,53 @@ async function fetchRoom() {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
+    // --- Только owner управляет видео ---
+    if (iAmOwner) {
+      v.addEventListener('play', () => {
+        if (isSeeking || isRemoteAction) return;
+        socket.emit('player_action', {
+          roomId,
+          position: v.currentTime,
+          is_paused: false,
+          updatedAt: Date.now(),
+          userId: myUserId
+        });
+      });
+      v.addEventListener('pause', () => {
+        if (isSeeking || isRemoteAction) return;
+        socket.emit('player_action', {
+          roomId,
+          position: v.currentTime,
+          is_paused: true,
+          updatedAt: Date.now(),
+          userId: myUserId
+        });
+      });
+      v.addEventListener('seeking', () => { isSeeking = true; });
+      v.addEventListener('seeked', () => {
+        if (!isRemoteAction) {
+          socket.emit('player_action', {
+            roomId,
+            position: v.currentTime,
+            is_paused: v.paused,
+            updatedAt: Date.now(),
+            userId: myUserId
+          });
+        }
+        setTimeout(() => isSeeking = false, 200);
+      });
+    } else {
+      // --- Не owner — блокируем управление плеером ---
+      v.controls = false;
+      v.addEventListener('play', e => { if (!isRemoteAction) v.pause(); });
+      v.addEventListener('seeking', e => { if (!isRemoteAction) v.currentTime = v.currentTime; });
+    }
+
     player = v;
-    updatePlayerControls();
 
   } catch (err) {
     console.error('[ERROR] Ошибка комнаты:', err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
-  }
-}
-
-// Вспомогательное — обновляет поведение плеера в зависимости от роли
-function updatePlayerControls() {
-  if (!player) return;
-  // Сначала очистим все обработчики (во избежание дублей)
-  player.replaceWith(player.cloneNode(true));
-  const v = document.getElementById('videoPlayer');
-  player = v;
-  // HUD (контролы) ВСЕГДА отображаются
-  v.controls = true;
-
-  if (iAmOwner) {
-    v.addEventListener('play', () => {
-      if (isSeeking || isRemoteAction) return;
-      socket.emit('player_action', {
-        roomId,
-        position: v.currentTime,
-        is_paused: false,
-        updatedAt: Date.now(),
-        userId: myUserId
-      });
-    });
-    v.addEventListener('pause', () => {
-      if (isSeeking || isRemoteAction) return;
-      socket.emit('player_action', {
-        roomId,
-        position: v.currentTime,
-        is_paused: true,
-        updatedAt: Date.now(),
-        userId: myUserId
-      });
-    });
-    v.addEventListener('seeking', () => { isSeeking = true; });
-    v.addEventListener('seeked', () => {
-      if (!isRemoteAction) {
-        socket.emit('player_action', {
-          roomId,
-          position: v.currentTime,
-          is_paused: v.paused,
-          updatedAt: Date.now(),
-          userId: myUserId
-        });
-      }
-      setTimeout(() => isSeeking = false, 200);
-    });
-  } else {
-    // Не owner — контролы видны, но нельзя управлять
-    v.addEventListener('play', e => { if (!isRemoteAction) v.pause(); });
-    v.addEventListener('pause', e => { if (!isRemoteAction) player.play().catch(() => {}); });
-    v.addEventListener('seeking', e => { if (!isRemoteAction) v.currentTime = v.currentTime; });
-    v.addEventListener('click', e => { if (!isRemoteAction) e.preventDefault(); });
   }
 }
 
