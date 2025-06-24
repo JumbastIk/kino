@@ -31,6 +31,7 @@ let iAmOwner = false;
 let myUserId = null;
 let initialSync = null;
 let syncTimeout = null;
+let controlsLocked = false;  // глобальный флаг блокировки управления
 
 // --- Функция для обновления owner_id в базе через бекенд ---
 async function setOwnerIdInDb(roomId, ownerId) {
@@ -67,7 +68,7 @@ function emitPlayerAction(paused) {
   });
 }
 
-// Присоединяемся и запрашиваем состояние
+// --- Присоединяемся и запрашиваем состояние ---
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -92,7 +93,7 @@ socket.on('system_message', msg => {
   if (msg?.text) appendSystemMessage(msg.text);
 });
 sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage);
+msgInput.addEventListener('keydown', e => e.key === 'Enter' && sendMessage());
 function sendMessage() {
   const text = msgInput.value.trim();
   if (!text) return;
@@ -111,8 +112,9 @@ function debouncedSync(position, is_paused, updatedAt, owner_id) {
 // Собственно синхронизация
 function syncPlayer(position, is_paused, updatedAt, owner_id) {
   updateOwnerState(owner_id);
-  // показываем/скрываем блокер
-  if (blocker) blocker.style.display = iAmOwner ? 'none' : 'block';
+  // обновляем состояние блокировки
+  blocker.style.display = iAmOwner || !controlsLocked ? 'none' : 'block';
+  player.controls      = iAmOwner || !controlsLocked;
 
   if (updatedAt < lastUpdate) return;
   lastUpdate = updatedAt;
@@ -137,7 +139,7 @@ function syncPlayer(position, is_paused, updatedAt, owner_id) {
   setTimeout(() => isRemoteAction = false, 120);
 }
 
-// Слушаем синхронизацию и обновления
+// Слушаем sync_state и player_update
 socket.on('sync_state', data => {
   if (!player) {
     initialSync = data;
@@ -149,7 +151,16 @@ socket.on('player_update', data => {
   debouncedSync(data.position, data.is_paused, data.updatedAt, data.owner_id);
 });
 
-// --- Получить данные комнаты и инициализировать плеер ---
+// Обработка события блокировки от owner-а
+socket.on('controls_locked', locked => {
+  controlsLocked = locked;
+  if (player) {
+    blocker.style.display = !iAmOwner && controlsLocked ? 'block' : 'none';
+    player.controls      = iAmOwner || !controlsLocked;
+  }
+});
+
+// --- Инициализация плеера и UI ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -167,7 +178,7 @@ async function fetchRoom() {
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
-    // Создаём контейнер для видео + блокера
+    // Контейнер для видео + блокера
     playerWrapper.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.style.position = 'relative';
@@ -175,10 +186,8 @@ async function fetchRoom() {
       <video id="videoPlayer" controls crossorigin="anonymous" playsinline
              style="width:100%; border-radius:14px"></video>
     `;
-    // спиннер
     const spinner = createSpinner();
     wrap.appendChild(spinner);
-    // блокер поверх видео
     blocker = document.createElement('div');
     blocker.id = 'blocker';
     Object.assign(blocker.style, {
@@ -187,13 +196,12 @@ async function fetchRoom() {
       width: '100%', height: '100%',
       background: 'rgba(0,0,0,0)',
       pointerEvents: 'all',
-      display: iAmOwner ? 'none' : 'block'
+      display: (!iAmOwner && controlsLocked) ? 'block' : 'none'
     });
     wrap.appendChild(blocker);
-
     playerWrapper.appendChild(wrap);
 
-    // бейдж комнаты
+    // Badge и копирование ID
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -206,6 +214,27 @@ async function fetchRoom() {
       navigator.clipboard.writeText(roomId);
       alert('ID комнаты скопирован');
     };
+
+    // Кнопка блокировки управления (только owner)
+    if (iAmOwner) {
+      const ctrlDiv = document.createElement('div');
+      ctrlDiv.style.margin = '8px 0';
+      ctrlDiv.innerHTML = `
+        <label>
+          <input type="checkbox" id="toggleLock" ${controlsLocked ? 'checked' : ''}/>
+          Запретить переключение зрителям
+        </label>
+      `;
+      badge.after(ctrlDiv);
+      document.getElementById('toggleLock').addEventListener('change', e => {
+        controlsLocked = e.target.checked;
+        // шлём всем в комнате
+        socket.emit('toggle_controls', { roomId, locked: controlsLocked });
+        // применяем сразу локально
+        blocker.style.display = controlsLocked ? 'block' : 'none';
+        player.controls      = !controlsLocked;
+      });
+    }
 
     const v = document.getElementById('videoPlayer');
     let hls = null;
@@ -226,7 +255,6 @@ async function fetchRoom() {
       throw new Error('Ваш браузер не поддерживает HLS');
     }
 
-    // применяем начальный sync, когда метаданные загружены
     v.addEventListener('loadedmetadata', () => {
       if (initialSync) {
         syncPlayer(initialSync.position, initialSync.is_paused, initialSync.updatedAt, initialSync.owner_id);
@@ -234,23 +262,27 @@ async function fetchRoom() {
       }
     });
 
-    // Слушатели play/pause/seek для owner-а
+    // Слушатели play/pause/seek
     v.addEventListener('play', () => {
-      if (!iAmOwner) {
-        player.pause();
+      if (!iAmOwner && controlsLocked) {
+        v.pause();
         return;
       }
-      if (!isRemoteAction) emitPlayerAction(false);
+      if (iAmOwner && !isRemoteAction) emitPlayerAction(false);
     });
     v.addEventListener('pause', () => {
-      if (!iAmOwner) {
-        player.pause();
+      if (!iAmOwner && controlsLocked) {
+        v.play();
         return;
       }
-      if (!isRemoteAction) emitPlayerAction(true);
+      if (iAmOwner && !isRemoteAction) emitPlayerAction(true);
     });
     v.addEventListener('seeking', () => { isSeeking = true; });
     v.addEventListener('seeked', () => {
+      if (!iAmOwner && controlsLocked) {
+        // вернёмся назад, если зритель пытался
+        syncPlayer(lastUpdatePos, !player.paused, lastUpdate, ownerId);
+      }
       if (iAmOwner && !isRemoteAction) {
         emitPlayerAction(player.paused);
       }
@@ -264,6 +296,16 @@ async function fetchRoom() {
   }
 }
 
+// От сервера: обновление флага блокировки
+socket.on('controls_locked', locked => {
+  controlsLocked = locked;
+  if (blocker && player) {
+    blocker.style.display = (!iAmOwner && controlsLocked) ? 'block' : 'none';
+    player.controls      = iAmOwner || !controlsLocked;
+  }
+});
+
+// При смене владельца
 socket.on('owner_changed', newOwnerId => {
   updateOwnerState(newOwnerId);
 });
