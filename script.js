@@ -162,7 +162,6 @@ async function createRoom(title) {
   }
   if (newRoomId) {
     renderRooms(newRoomId);
-    // подсветим найденную комнату
     setTimeout(() => addRoomToSlider({ id: newRoomId, title, viewers: 1, created_at: new Date() }, true), 100);
   }
 }
@@ -197,7 +196,6 @@ async function searchRoomById() {
         </a>
       </div>
     `;
-    // Подсветим карточку в слайдере, если она есть
     addRoomToSlider(room, true);
   } catch (err) {
     result.textContent = err.message;
