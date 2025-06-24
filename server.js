@@ -25,6 +25,7 @@ app.options('*', cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
+// ==== Получить список комнат ====
 app.get('/api/rooms', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -39,6 +40,7 @@ app.get('/api/rooms', async (req, res) => {
   }
 });
 
+// ==== Получить комнату по ID ====
 app.get('/api/rooms/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -54,9 +56,11 @@ app.get('/api/rooms/:id', async (req, res) => {
   }
 });
 
+// ==== Создать комнату ====
+// Теперь ownerId принимается из req.body (userId создателя)
 app.post('/api/rooms', async (req, res) => {
   try {
-    const { title, movieId } = req.body;
+    const { title, movieId, ownerId } = req.body;
     const id = Math.random().toString(36).substring(2, 11);
 
     const { error: insertError } = await supabase
@@ -65,7 +69,8 @@ app.post('/api/rooms', async (req, res) => {
         id,
         title:    title || 'Без названия',
         movie_id: movieId,
-        viewers:  1
+        viewers:  1,
+        owner_id: ownerId // Сохраняем владельца комнаты!
       }]);
     if (insertError) throw insertError;
 
@@ -84,6 +89,7 @@ app.post('/api/rooms', async (req, res) => {
   }
 });
 
+// ==== Сообщения чата ====
 app.get('/api/messages/:roomId', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -113,6 +119,7 @@ app.post('/api/messages', async (req, res) => {
   }
 });
 
+// ==== SPA (Single Page App) fallback ====
 app.get(/^\/(?!api|socket\.io).*/, (req, res) => {
   const index = path.join(__dirname, 'index.html');
   if (fs.existsSync(index)) return res.sendFile(index);
@@ -133,7 +140,7 @@ const io = new Server(server, {
   }
 });
 
-// ==== Подключение realtime.js для socket.io ====
+// ==== Подключение realtime.js для socket.io (логика комнат) ====
 require('./realtime')(io);
 
 const PORT = process.env.PORT || 3000;
