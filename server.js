@@ -1,156 +1,72 @@
-const BACKEND = window.location.hostname.includes('localhost')
-  ? 'http://localhost:3000'
-  : 'https://kino-fhwp.onrender.com';
+// server.js
 
-const socket = io(BACKEND, {
-  path: '/socket.io',
-  transports: ['websocket']
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+
+const app = express();
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  path: '/socket.io'
 });
 
-const params = new URLSearchParams(window.location.search);
-const roomId = params.get('roomId');
-if (!roomId) {
-  alert('Не указан ID комнаты.');
-  location.href = 'index.html';
-}
+app.use(cors());
+app.use(express.json());
 
-const playerWrapper = document.getElementById('playerWrapper');
-const backLink      = document.getElementById('backLink');
-const messagesBox   = document.getElementById('messages');
-const membersList   = document.getElementById('membersList');
-const msgInput      = document.getElementById('msgInput');
-const sendBtn       = document.getElementById('sendBtn');
+// Подключение к API и заглушки для фронта
+const rooms = {}; // { [roomId]: { ... } }
+const movies = []; // заглушка под movies для примера
 
-let player, isSeeking = false, isRemoteAction = false;
+// API
+app.get('/api/rooms', (req, res) => {
+  res.json(Object.values(rooms));
+});
 
-// ====== Голосовой чат ======
-if (typeof window.setupWebRTC === "function") {
-  window.setupWebRTC({ socket, roomId, membersListSelector: '#membersList', micBtnParent: '.chat-input-wrap' });
-}
+app.get('/api/rooms/:id', (req, res) => {
+  const room = rooms[req.params.id];
+  if (!room) return res.status(404).json({ details: "Комната не найдена" });
+  res.json(room);
+});
 
-// ====== Текстовый чат ======
-if (typeof window.setupChat === "function") {
-  window.setupChat({ socket, roomId, messagesBox, msgInput, sendBtn });
-}
+app.post('/api/rooms', (req, res) => {
+  const { title } = req.body;
+  const id = Math.random().toString(36).substr(2, 9);
+  const created_at = new Date();
+  rooms[id] = { id, title, viewers: 1, created_at };
+  res.json({ id });
+  io.emit('room_created', rooms[id]);
+});
 
-// =========== UI, плеер, синхронизация ===========
-
-socket.emit('join',          { roomId, userData: { id: socket.id, first_name: 'Гость' } });
-socket.emit('request_state', { roomId });
-
-socket.on('sync_state', applySyncState);
-socket.on('player_update', applySyncState);
-
-function applySyncState({ position = 0, is_paused }) {
-  if (!player) return;
-  isRemoteAction = true;
-  isSeeking = true;
-  player.currentTime = position;
-  if (is_paused) {
-    player.pause();
-  } else {
-    player.play().catch(() => {});
-  }
-  setTimeout(() => {
-    isRemoteAction = false;
-    isSeeking = false;
-  }, 200);
-}
-
-function createSpinner() {
-  const s = document.createElement('div');
-  s.className = 'buffer-spinner';
-  s.innerHTML =
-    `<div class="double-bounce1"></div>
-    <div class="double-bounce2"></div>`;
-  s.style.display = 'none';
-  return s;
-}
-
-async function fetchRoom() {
-  try {
-    const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const roomData = await res.json();
-
-    // movies должен быть определён через data.js до этого файла!
-    const movie = window.movies.find(m => m.id === roomData.movie_id);
-    if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
-    backLink.href = `${movie.html}?id=${movie.id}`;
-
-    playerWrapper.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.style.position = 'relative';
-    wrap.innerHTML =
-      `<video id="videoPlayer" controls crossorigin="anonymous" playsinline
-             style="width:100%;border-radius:14px"></video>`;
-    const spinner = createSpinner();
-    wrap.appendChild(spinner);
-    playerWrapper.appendChild(wrap);
-
-    const badge = document.createElement('div');
-    badge.className = 'room-id-badge';
-    badge.innerHTML =
-      `<small>ID комнаты:</small>
-      <code>${roomId}</code>
-      <button id="copyRoomId">Копировать</button>`;
-    playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick = () => {
-      navigator.clipboard.writeText(roomId);
-      alert('ID комнаты скопирован');
-    };
-
-    const v = document.getElementById('videoPlayer');
-    if (window.Hls && window.Hls.isSupported()) {
-      const hls = new Hls({ debug: false });
-      hls.loadSource(movie.videoUrl);
-      hls.attachMedia(v);
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        console.error('[HLS] Ошибка:', data);
-        alert('Ошибка загрузки видео');
-      });
-      v.addEventListener('waiting', () => spinner.style.display = 'block');
-      v.addEventListener('playing', () => spinner.style.display = 'none');
-    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-      v.src = movie.videoUrl;
-    } else {
-      throw new Error('Ваш браузер не поддерживает HLS');
+// SOCKET.IO EVENTS
+io.on('connection', (socket) => {
+  socket.on('join', ({ roomId, userData }) => {
+    if (rooms[roomId]) {
+      rooms[roomId].viewers += 1;
+      io.emit('room_updated', { id: roomId, viewers: rooms[roomId].viewers });
     }
+    socket.join(roomId);
+  });
 
-    v.addEventListener('play', () => {
-      if (isSeeking || isRemoteAction) return;
-      socket.emit('player_action', {
-        roomId,
-        position: v.currentTime,
-        is_paused: false
-      });
-    });
-    v.addEventListener('pause', () => {
-      if (isSeeking || isRemoteAction) return;
-      socket.emit('player_action', {
-        roomId,
-        position: v.currentTime,
-        is_paused: true
-      });
-    });
-    v.addEventListener('seeking', () => { isSeeking = true; });
-    v.addEventListener('seeked', () => {
-      if (!isRemoteAction) {
-        socket.emit('player_action', {
-          roomId,
-          position: v.currentTime,
-          is_paused: v.paused
-        });
-      }
-      setTimeout(() => isSeeking = false, 200);
-    });
+  socket.on('player_action', (data) => {
+    socket.to(data.roomId).emit('player_update', data);
+  });
 
-    player = v;
+  socket.on('request_state', ({ roomId }) => {
+    // Можно реализовать sync_state если требуется
+  });
 
-  } catch (err) {
-    console.error('[ERROR] Ошибка комнаты:', err);
-    playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
-  }
-}
+  socket.on('disconnect', () => {
+    // Логика viewers по disconnect если нужно
+  });
+});
 
-fetchRoom();
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log('Server listening on port', PORT);
+});
