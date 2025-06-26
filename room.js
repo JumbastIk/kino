@@ -35,9 +35,9 @@ let metadataReady  = false;
 let sendLock       = false;
 
 // thresholds
-const HARD_SYNC_THRESHOLD   = 0.3;  // sec
-const SOFT_SYNC_THRESHOLD   = 0.05; // sec
-const AUTO_RESYNC_THRESHOLD = 1.0;  // sec
+const HARD_SYNC_THRESHOLD   = 0.3;
+const SOFT_SYNC_THRESHOLD   = 0.05;
+const AUTO_RESYNC_THRESHOLD = 1.0;
 
 // 1) measure RTT
 function measurePing() {
@@ -53,13 +53,11 @@ setInterval(measurePing, 10000);
 // 2) on connect
 socket.on('connect', () => {
   myUserId = socket.id;
-  console.log('[SOCKET] connect as', myUserId);
   socket.emit('join',          { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 socket.on('reconnect', () => {
-  console.log('[SOCKET] reconnect');
   socket.emit('request_state', { roomId });
 });
 
@@ -96,7 +94,7 @@ function scheduleSync(d) {
   }
 }
 
-// 5) doSync with logs
+// 5) doSync with correct drift calculation
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   console.log('[doSync START]', {
     now: Date.now(),
@@ -115,11 +113,17 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   if (!player) return;
 
   isRemoteAction = true;
-  const now    = Date.now();
-  const drift = (now - serverTs) - lastPing/2;
-  const target= isPaused ? pos : pos + drift/1000;
-  const delta = target - player.currentTime;
-  const absD  = Math.abs(delta);
+
+  const now = Date.now();
+  // Правильный перевод в секунды:
+  const rttSec      = lastPing / 1000;
+  const oneWayDelay = rttSec / 2;
+  const elapsed     = (now - serverTs) / 1000;
+  const drift       = elapsed - oneWayDelay;
+
+  const target = isPaused ? pos : pos + drift;
+  const delta  = target - player.currentTime;
+  const absD   = Math.abs(delta);
 
   console.log('[doSync] drift, target, delta, absD', { drift, target, delta, absD });
 
@@ -127,7 +131,7 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
     console.log('[doSync] AUTO_RESYNC_THRESHOLD exceeded → request_state');
     socket.emit('request_state', { roomId });
   }
-  if (absD > HARD_SYNC_THRESHOLD) {
+  else if (absD > HARD_SYNC_THRESHOLD) {
     console.log('[doSync] HARD_SYNC_THRESHOLD → jump to', target);
     player.currentTime = target;
   }
@@ -211,27 +215,8 @@ async function fetchRoom(){
       throw new Error('HLS не поддерживается');
     }
 
-    // remember paused-state before seek
-    let preSeekWasPaused = true;
-    v.addEventListener('seeking', () => {
-      preSeekWasPaused = v.paused;
-      console.log('[SEEK] started, wasPaused=', preSeekWasPaused);
-    });
-    v.addEventListener('seeked', () => {
-      console.log('[SEEK] finished, newTime=', v.currentTime);
-      if (!isRemoteAction) {
-        emitAction(v.paused);
-        // если до seek было PLAY — сразу запускаем
-        if (!preSeekWasPaused) {
-          console.log('[SEEK] restoring play');
-          v.play().catch(()=>{});
-        }
-      }
-    });
-
     v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
-      console.log('[VIDEO] loadedmetadata, duration=', v.duration);
       if (initialSync) {
         doSync(initialSync);
         initialSync = null;
@@ -239,11 +224,11 @@ async function fetchRoom(){
     });
 
     function emitAction(paused) {
+      if (sendLock) return;
       console.log('[EMIT] player_action', {
         position: v.currentTime,
         paused
       });
-      if (sendLock) return;
       socket.emit('player_action', {
         roomId,
         position:  v.currentTime,
@@ -254,10 +239,13 @@ async function fetchRoom(){
       setTimeout(()=> sendLock = false, 150);
     }
 
-    v.addEventListener('play',  () => {
+    v.addEventListener('seeked', () => {
+      if (!isRemoteAction) emitAction(v.paused);
+    });
+    v.addEventListener('play',   () => {
       if (!isRemoteAction) emitAction(false);
     });
-    v.addEventListener('pause', () => {
+    v.addEventListener('pause',  () => {
       if (!isRemoteAction) emitAction(true);
     });
 
