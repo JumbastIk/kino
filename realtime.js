@@ -1,258 +1,199 @@
-// room.js
+// realtime.js
 
-const BACKEND = location.hostname.includes('localhost')
-  ? 'http://localhost:3000'
-  : 'https://kino-fhwp.onrender.com';
+const supabase = require('./supabase');
 
-const socket = io(BACKEND, {
-  path: '/socket.io',
-  transports: ['websocket']
-});
+// Глобальный state для синхронизации плеера во всех комнатах:
+// roomsState[roomId] = { time: Number, playing: Boolean, speed: Number, updatedAt: Number }
+const roomsState      = {};
+// Для периодической рассылки прогнозного состояния
+const broadcastTimers = {};
 
-const params = new URLSearchParams(location.search);
-const roomId = params.get('roomId');
-if (!roomId) {
-  alert('Не указан ID комнаты.');
-  location.href = 'index.html';
-}
+module.exports = function(io) {
+  io.on('connection', socket => {
+    let currentRoom = null;
+    let userId      = null;
 
-const playerWrapper = document.getElementById('playerWrapper');
-const backLink      = document.getElementById('backLink');
-const messagesBox   = document.getElementById('messages');
-const membersList   = document.getElementById('membersList');
-const msgInput      = document.getElementById('msgInput');
-const sendBtn       = document.getElementById('sendBtn');
+    // === Helper: запустить рассылку прогноза каждые 5 секунд ===
+    function startBroadcast(roomId) {
+      if (broadcastTimers[roomId]) return;
+      broadcastTimers[roomId] = setInterval(() => {
+        const s = roomsState[roomId];
+        if (!s) return;
+        const now     = Date.now();
+        const elapsed = (now - s.updatedAt) / 1000;
+        const pos     = s.playing
+          ? s.time + elapsed * s.speed
+          : s.time;
 
-let player;
-let isRemoteAction   = false;
-let lastUpdate       = 0;
-let myUserId         = null;
-let initialSync      = null;
-let syncTimeout      = null;
+        io.to(roomId).emit('sync_state', {
+          position:  pos,
+          is_paused: !s.playing,
+          speed:     s.speed,
+          updatedAt: now
+        });
+      }, 5000);
+    }
 
-let lastPing         = 0;
-let sendLock         = false;
-// запомним таймстамп последнего местного действия (seek|play|pause)
-let lastLocalAction  = 0;
-
-
-// 1) Меряем RTT
-function measurePing() {
-  const t0 = Date.now();
-  socket.emit('ping');
-  socket.once('pong', () => {
-    lastPing = Date.now() - t0;
-  });
-}
-setInterval(measurePing, 10_000);
-
-
-// 2) Троттлим отправку player_action и запоминаем момент
-function emitPlayerActionThrottled(isPaused) {
-  if (sendLock) return;
-  const now = Date.now();
-  lastLocalAction = now;
-  socket.emit('player_action', {
-    roomId,
-    position:  player.currentTime,
-    is_paused: isPaused,
-    speed:     player.playbackRate
-  });
-  sendLock = true;
-  setTimeout(() => sendLock = false, 150);
-}
-
-
-// 3) Подключаемся и синхронизируем
-socket.on('connect', () => {
-  myUserId = socket.id;
-  socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
-  socket.emit('request_state', { roomId });
-  fetchRoom();
-});
-
-// Chat & members
-socket.on('members', ms => {
-  membersList.innerHTML =
-    `<div class="chat-members-label">Участники (${ms.length}):</div>
-     <ul>${ms.map(m=>`<li>${m.user_id}</li>`).join('')}</ul>`;
-});
-socket.on('history', data => {
-  messagesBox.innerHTML = '';
-  data.forEach(m=>appendMessage(m.author, m.text));
-});
-socket.on('chat_message', m => appendMessage(m.author, m.text));
-socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
-
-// ping/pong
-socket.on('pong', () => { /* есть, но нам достаточно one-time listener в measurePing */ });
-
-// send chat
-sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => e.key==='Enter' && sendMessage());
-function sendMessage() {
-  const t = msgInput.value.trim();
-  if (!t) return;
-  socket.emit('chat_message', { roomId, author:'Гость', text:t });
-  msgInput.value = '';
-}
-
-
-// 4) Sync с учётом пинга, прогноза и игнора remote после локальных действий
-function debouncedSync(pos, isPaused, serverTs) {
-  if (syncTimeout) clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(()=>{
-    doSync(pos, isPaused, serverTs);
-  }, 50);
-}
-
-function doSync(pos, isPaused, serverTs) {
-  // 1) Игнорируем „эхо“ сервера, пришедшее сразу после нашего seek/play/pause
-  if (serverTs <= lastLocalAction + 500) return;
-
-  // 2) Устаревшие сообщения
-  if (serverTs < lastUpdate) return;
-  lastUpdate = serverTs;
-  if (!player) return;
-
-  isRemoteAction = true;
-
-  // 3) Прогнозируем позицию с учётом RTT
-  const now      = Date.now();
-  const driftMs  = (now - serverTs) - lastPing/2;
-  const target   = isPaused
-    ? pos
-    : pos + driftMs/1000;
-
-  const delta    = target - player.currentTime;
-  const absDelta = Math.abs(delta);
-
-  // 4) Жёсткий seek >1с
-  if (absDelta > 1) {
-    player.currentTime = target;
-  }
-  // 5) Мягкая подгонка скорости 0.05–1с
-  else if (absDelta > 0.05) {
-    player.playbackRate = delta > 0 ? 1.05 : 0.95;
-    setTimeout(() => {
-      if (player) player.playbackRate = 1;
-    }, 500);
-  }
-
-  // 6) Пауза/воспроизведение: 
-  //    — если видео должно играть, даже после seek остаём его playing
-  if (isPaused) {
-    if (!player.paused) player.pause();
-  } else {
-    if (player.paused) player.play().catch(()=>{
-      if (!window.__autoplayWarned) {
-        window.__autoplayWarned = true;
-        alert('Нажмите по видео для автозапуска');
+    // === Helper: остановить рассылку и очистить state, если в комнате никого нет ===
+    function stopBroadcastIfEmpty(roomId) {
+      const room = io.sockets.adapter.rooms.get(roomId);
+      if (!room || room.size === 0) {
+        clearInterval(broadcastTimers[roomId]);
+        delete broadcastTimers[roomId];
+        delete roomsState[roomId];
       }
-    });
-  }
+    }
 
-  // 7) Сброс флага
-  setTimeout(() => isRemoteAction = false, 100);
-}
+    // ===== Вход в комнату =====
+    socket.on('join', async ({ roomId, userData }) => {
+      try {
+        currentRoom = roomId;
+        userId      = userData.id;
+        socket.join(roomId);
 
-socket.on('sync_state', d => {
-  if (!player) initialSync = d;
-  else           debouncedSync(d.position, d.is_paused, d.updatedAt);
-});
-socket.on('player_update', d => {
-  debouncedSync(d.position, d.is_paused, d.updatedAt);
-});
+        // — Обновляем список участников в БД —
+        await supabase
+          .from('room_members')
+          .upsert(
+            { room_id: roomId, user_id: userId },
+            { onConflict: ['room_id','user_id'] }
+          );
 
+        // — Шлём всем обновлённый список участников —
+        const { data: members } = await supabase
+          .from('room_members')
+          .select('user_id')
+          .eq('room_id', roomId);
+        io.to(roomId).emit('members', members);
 
-// === Инициализация плеера (привязываем throttled emit) ===
+        // — Системное сообщение о входе —
+        io.to(roomId).emit('system_message', {
+          text:       `Пользователь вошёл в комнату`,
+          created_at: new Date().toISOString()
+        });
 
-async function fetchRoom(){
-  try {
-    const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
-    if (!res.ok) throw new Error(res.status);
-    const roomData = await res.json();
+        // — История чата для новичка —
+        const { data: messages } = await supabase
+          .from('messages')
+          .select('author, text, created_at')
+          .eq('room_id', roomId)
+          .order('created_at', { ascending: true });
+        socket.emit('history', messages);
 
-    const movie = movies.find(m=>m.id===roomData.movie_id);
-    if (!movie?.videoUrl) throw new Error('Фильм не найден');
-    backLink.href = `${movie.html}?id=${movie.id}`;
+        // — Инициализируем состояние плеера, если ещё не было —
+        if (!roomsState[roomId]) {
+          roomsState[roomId] = {
+            time:      0,
+            playing:   false,
+            speed:     1,
+            updatedAt: Date.now()
+          };
+        }
 
-    playerWrapper.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.style.position='relative';
-    wrap.innerHTML=`
-      <video id="videoPlayer" controls crossorigin="anonymous" playsinline
-             style="width:100%;border-radius:14px"></video>`;
-    const spinner = createSpinner();
-    wrap.appendChild(spinner);
-    playerWrapper.appendChild(wrap);
+        // — Запускаем периодическую рассылку прогноза для этой комнаты —
+        startBroadcast(roomId);
 
-    // бейдж и кнопка “копировать”
-    const badge = document.createElement('div');
-    badge.className='room-id-badge';
-    badge.innerHTML=`
-      <small>ID комнаты:</small><code>${roomId}</code>
-      <button id="copyRoomId">Копировать</button>`;
-    playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick=()=>{
-      navigator.clipboard.writeText(roomId);
-      alert('Скопировано');
-    };
+        // — Отправляем новичку текущее состояние —
+        const s = roomsState[roomId];
+        socket.emit('sync_state', {
+          position:  s.time,
+          is_paused: !s.playing,
+          speed:     s.speed,
+          updatedAt: s.updatedAt
+        });
 
-    const v = document.getElementById('videoPlayer');
-    if (window.Hls?.isSupported()) {
-      const hls = new Hls();
-      hls.loadSource(movie.videoUrl);
-      hls.attachMedia(v);
-      v.addEventListener('waiting', ()=>spinner.style.display='block');
-      v.addEventListener('playing',()=>spinner.style.display='none');
-    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-      v.src=movie.videoUrl;
-    } else throw new Error('HLS не поддерживается');
-
-    v.addEventListener('loadedmetadata', () => {
-      if (initialSync) {
-        doSync(
-          initialSync.position,
-          initialSync.is_paused,
-          initialSync.updatedAt
-        );
-        initialSync = null;
+      } catch (err) {
+        console.error('Error on join:', err.message);
       }
     });
 
-    // привязываем throttled-emit
-    v.addEventListener('play',   () => { if (!isRemoteAction) emitPlayerActionThrottled(false); });
-    v.addEventListener('pause',  () => { if (!isRemoteAction) emitPlayerActionThrottled(true); });
-    v.addEventListener('seeked', () => { if (!isRemoteAction) emitPlayerActionThrottled(v.paused); });
+    // ===== Получение актуального состояния по запросу =====
+    socket.on('request_state', ({ roomId }) => {
+      const s = roomsState[roomId] || {
+        time:      0,
+        playing:   false,
+        speed:     1,
+        updatedAt: Date.now()
+      };
+      socket.emit('sync_state', {
+        position:  s.time,
+        is_paused: !s.playing,
+        speed:     s.speed,
+        updatedAt: s.updatedAt
+      });
+    });
 
-    player = v;
+    // ===== Пинг-понг для измерения RTT =====
+    socket.on('ping', () => {
+      socket.emit('pong');
+    });
 
-  } catch(err){
-    console.error(err);
-    playerWrapper.innerHTML=`<p class="error">Ошибка: ${err.message}</p>`;
-  }
-}
+    // ===== Синхронизация действий плеера =====
+    socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
+      const now = Date.now();
+      roomsState[roomId] = {
+        time:      position,
+        playing:   !is_paused,
+        speed:     speed || 1,
+        updatedAt: now
+      };
+      socket.to(roomId).emit('player_update', {
+        position,
+        is_paused,
+        speed:     speed || 1,
+        updatedAt: now
+      });
+    });
 
-function createSpinner(){
-  const s=document.createElement('div');
-  s.className='buffer-spinner';
-  s.innerHTML=`<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
-  s.style.display='none';
-  return s;
-}
+    // ===== Чат =====
+    socket.on('chat_message', async msg => {
+      try {
+        await supabase.from('messages').insert([{
+          room_id: msg.roomId,
+          author:  msg.author,
+          text:    msg.text
+        }]);
+        io.to(msg.roomId).emit('chat_message', {
+          author:     msg.author,
+          text:       msg.text,
+          created_at: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error('Error on chat_message:', err.message);
+      }
+    });
 
-function appendMessage(a,t){
-  const d=document.createElement('div');
-  d.className='chat-message';
-  d.innerHTML=`<strong>${a}:</strong> ${t}`;
-  messagesBox.appendChild(d);
-  messagesBox.scrollTop=messagesBox.scrollHeight;
-}
-function appendSystemMessage(t){
-  const d=document.createElement('div');
-  d.className='chat-message system-message';
-  d.innerHTML=`<em>${t}</em>`;
-  messagesBox.appendChild(d);
-  messagesBox.scrollTop=messagesBox.scrollHeight;
-}
+    // ===== Отключение пользователя =====
+    socket.on('disconnect', async () => {
+      try {
+        if (!currentRoom || !userId) return;
+
+        // — Удаляем из списка участников —
+        await supabase
+          .from('room_members')
+          .delete()
+          .match({ room_id: currentRoom, user_id: userId });
+
+        // — Обновляем список и шлём всем —
+        const { data: members } = await supabase
+          .from('room_members')
+          .select('user_id')
+          .eq('room_id', currentRoom);
+        io.to(currentRoom).emit('members', members);
+
+        // — Системное сообщение о выходе —
+        io.to(currentRoom).emit('system_message', {
+          text:       `Пользователь вышел из комнаты`,
+          created_at: new Date().toISOString()
+        });
+
+        // — Если комната пустая, убираем таймер и state —
+        stopBroadcastIfEmpty(currentRoom);
+
+      } catch (err) {
+        console.error('Error on disconnect:', err.message);
+      }
+    });
+
+  });
+};
