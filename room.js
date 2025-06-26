@@ -1,9 +1,13 @@
 // room.js
 
+// ————— 0) Подключите MQTT.js в <head> страницы:
+// <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
 const BACKEND = location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
+// Socket.io — только для чата и списка участников
 const socket = io(BACKEND, {
   path: '/socket.io',
   transports: ['websocket']
@@ -23,8 +27,7 @@ const membersList   = document.getElementById('membersList');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
-let player;
-let spinner;           // буфер-спиннер
+let player, spinner, mqttClient;
 let isRemoteAction = false;
 let lastUpdate     = 0;
 let lastPing       = 0;
@@ -32,12 +35,12 @@ let myUserId       = null;
 let initialSync    = null;
 let metadataReady  = false;
 
-// thresholds
-const HARD_SYNC_THRESHOLD   = 0.3;  // seconds – jump
-const SOFT_SYNC_THRESHOLD   = 0.05; // seconds – rate adjust
-const AUTO_RESYNC_THRESHOLD = 1.0;  // seconds – force request_state
+// пороги
+const HARD_SYNC_THRESHOLD   = 0.3;
+const SOFT_SYNC_THRESHOLD   = 0.05;
+const AUTO_RESYNC_THRESHOLD = 1.0;
 
-// 1) measure RTT
+// 1) измеряем RTT
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -47,18 +50,18 @@ function measurePing() {
 }
 setInterval(measurePing, 10_000);
 
-// 2) on connect request state
+// 2) Socket.io: присоединяемся и стартуем MQTT + UI
 socket.on('connect', () => {
   myUserId = socket.id;
-  socket.emit('join',          { roomId, userData: { id: myUserId, first_name: 'Гость' } });
-  socket.emit('request_state', { roomId });
+  socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
+  initMQTT();
   fetchRoom();
 });
 socket.on('reconnect', () => {
-  socket.emit('request_state', { roomId });
+  // при переподключении MQTT.js автоматически ретраит retained-сообщение
 });
 
-// 3) chat and members
+// чат и список участников
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
@@ -79,19 +82,38 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// 4) incoming sync
-socket.on('sync_state', d => {
-  initialSync = d;
-  if (metadataReady) {
-    doSync(d.position, d.is_paused, d.updatedAt);
-    initialSync = null;
-  }
-});
-socket.on('player_update', d => {
-  doSync(d.position, d.is_paused, d.updatedAt);
-});
+// 3) Инициализация MQTT (QoS 2, retained, persistent session)
+function initMQTT() {
+  mqttClient = mqtt.connect('wss://broker.hivemq.com:8000/mqtt', {
+    clientId: `client_${myUserId}`,
+    clean: false,               // persistent session
+    reconnectPeriod: 1000,
+    connectTimeout: 4000
+  });
 
-// 5) main sync logic (overlay removed)
+  mqttClient.on('connect', () => {
+    // подписываемся с QoS 2 и сразу получаем last-retained
+    mqttClient.subscribe(`video/${roomId}`, { qos: 2 }, () => {
+      // сразу публикуем своё состояние, чтобы others получили retained
+      publishState();
+    });
+  });
+
+  mqttClient.on('message', (_, payload) => {
+    try {
+      const msg = JSON.parse(payload.toString());
+      if (msg.roomId !== roomId) return;
+      if (msg.userId === myUserId) return;
+      initialSync = msg;
+      if (metadataReady) {
+        doSync(msg.position, msg.isPaused, msg.ts);
+        initialSync = null;
+      }
+    } catch {}
+  });
+}
+
+// 4) Основная sync-логика
 function doSync(pos, isPaused, serverTs) {
   if (serverTs <= lastUpdate) return;
   lastUpdate = serverTs;
@@ -99,29 +121,25 @@ function doSync(pos, isPaused, serverTs) {
 
   isRemoteAction = true;
   const now     = Date.now();
-  const driftMs = (now - serverTs) - lastPing/2;
-  const target  = isPaused ? pos : pos + driftMs/1000;
-  const delta   = target - player.currentTime;
-  const absD    = Math.abs(delta);
+  const drift  = (now - serverTs) - lastPing/2;
+  const target = isPaused ? pos : pos + drift/1000;
+  const delta  = target - player.currentTime;
+  const absD   = Math.abs(delta);
 
   if (absD > AUTO_RESYNC_THRESHOLD) {
-    socket.emit('request_state', { roomId });
+    publishState(); // форсим пересинхронизацию
   }
 
   if (absD > HARD_SYNC_THRESHOLD) {
     player.currentTime = target;
-  }
-  else if (absD > SOFT_SYNC_THRESHOLD && !isPaused) {
+  } else if (absD > SOFT_SYNC_THRESHOLD && !isPaused) {
     player.playbackRate = Math.min(1.5, Math.max(0.5, 1 + delta * 0.5));
-  }
-  else if (player.playbackRate !== 1) {
+  } else if (player.playbackRate !== 1) {
     player.playbackRate = 1;
   }
 
   if (isPaused && !player.paused) player.pause();
   else if (!isPaused && player.paused) player.play().catch(()=>{});
-
-  // overlay removed: ничего не делаем с out-of-sync
 
   setTimeout(() => {
     isRemoteAction = false;
@@ -129,14 +147,32 @@ function doSync(pos, isPaused, serverTs) {
   }, 500);
 }
 
-// 6) load room & init player + custom controls
+// 5) Публикация состояния в MQTT (QoS 2, retained)
+function publishState() {
+  if (!mqttClient || !player) return;
+  const msg = {
+    roomId,
+    userId:   myUserId,
+    position: player.currentTime,
+    isPaused: player.paused,
+    speed:    player.playbackRate,
+    ts:       Date.now()
+  };
+  mqttClient.publish(
+    `video/${roomId}`,
+    JSON.stringify(msg),
+    { qos: 2, retain: true }
+  );
+}
+
+// 6) Загрузка комнаты и инициализация UI + плеера
 async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(res.status);
     const { movie_id } = await res.json();
-    const movie = movies.find(m => m.id === movie_id);
-    if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
+    const movie = movies.find(m=>m.id===movie_id);
+    if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
     playerWrapper.innerHTML = '';
@@ -144,89 +180,90 @@ async function fetchRoom(){
     wrap.style.position = 'relative';
     wrap.innerHTML = `
       <video id="videoPlayer" playsinline muted crossorigin="anonymous"
-             style="width:100%;border-radius:14px; background:#000;"></video>
-      <div id="customControls" class="custom-controls">
+             style="width:100%;border-radius:14px;background:#000"></video>
+      <div class="custom-controls">
         <button id="btnPlay" class="control-btn">Play</button>
-        <input id="seekBar" type="range" class="seek-bar" min="0" max="100" value="0">
-        <span id="timeDisplay" class="time-display">00:00 / 00:00</span>
+        <input  id="seekBar" type="range" class="seek-bar" min="0" max="100" value="0">
+        <span   id="timeDisplay" class="time-display">00:00 / 00:00</span>
       </div>
     `;
-    // create & cache spinner
     spinner = createSpinner();
     wrap.appendChild(spinner);
-
     playerWrapper.appendChild(wrap);
 
-    // room ID badge
+    // бейдж комнаты
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
       <small>ID комнаты:</small><code>${roomId}</code>
       <button id="copyRoomId">Копировать</button>`;
     playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick = () => {
+    document.getElementById('copyRoomId').onclick = ()=>{
       navigator.clipboard.writeText(roomId);
       alert('Скопировано');
     };
 
-    const v = document.getElementById('videoPlayer');
+    const v       = document.getElementById('videoPlayer');
     const playBtn = document.getElementById('btnPlay');
     const seekBar = document.getElementById('seekBar');
     const timeDisp= document.getElementById('timeDisplay');
 
-    // HLS setup
+    // HLS
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
-      v.addEventListener('waiting',  () => spinner.style.display = 'block');
-      v.addEventListener('playing', () => spinner.style.display = 'none');
+      v.addEventListener('waiting',  ()=>spinner.style.display='block');
+      v.addEventListener('playing', ()=>spinner.style.display='none');
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = movie.videoUrl;
     } else {
       throw new Error('HLS не поддерживается');
     }
 
-    // metadata loaded
-    v.addEventListener('loadedmetadata', () => {
+    // метаданные
+    v.addEventListener('loadedmetadata', ()=>{
       metadataReady = true;
       seekBar.max = v.duration;
       updateTimeDisplay();
       if (initialSync) {
         v.pause();
-        doSync(initialSync.position, initialSync.is_paused, initialSync.updatedAt);
+        doSync(initialSync.position, initialSync.isPaused, initialSync.ts);
         initialSync = null;
       }
     });
 
-    // update seek/time
-    v.addEventListener('timeupdate', () => {
+    // обновление прогресса
+    v.addEventListener('timeupdate', ()=>{
       if (!isRemoteAction) {
         seekBar.value = v.currentTime;
         updateTimeDisplay();
       }
     });
-    function updateTimeDisplay() {
-      const fmt = t => {
-        const m = Math.floor(t/60), s = Math.floor(t%60);
+    function updateTimeDisplay(){
+      const fmt = t=>{
+        const m=Math.floor(t/60), s=Math.floor(t%60);
         return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
       };
       timeDisp.textContent = `${fmt(v.currentTime)} / ${fmt(v.duration)}`;
     }
 
-    // custom controls events
-    playBtn.onclick = () => v.paused ? v.play() : v.pause();
-    seekBar.oninput = () => {
+    // собственные контролы
+    playBtn.onclick = ()=>{
+      if (v.paused) v.play(); else v.pause();
+      publishState();
+    };
+    seekBar.oninput = ()=>{
       v.currentTime = seekBar.value;
       updateTimeDisplay();
     };
-    seekBar.onchange = () => emitReliableAction();
+    seekBar.onchange = ()=>publishState();
 
-    // filter user events
-    ['seeking','seeked','play','pause'].forEach(evt => {
-      v.addEventListener(evt, e => {
+    // фильтрация нативных событий
+    ['seeked','play','pause'].forEach(evt=>{
+      v.addEventListener(evt, e=>{
         if (!e.isTrusted || isRemoteAction) return;
-        if (evt !== 'seeking') emitReliableAction();
+        publishState();
       });
     });
 
@@ -237,18 +274,7 @@ async function fetchRoom(){
   }
 }
 
-// reliable action emitter
-function emitReliableAction() {
-  const data = {
-    roomId,
-    position:  player.currentTime,
-    is_paused: player.paused,
-    speed:     player.playbackRate
-  };
-  [0,100,200].forEach(d => setTimeout(() => socket.emit('player_action', data), d));
-}
-
-// helpers
+// ————— вспомогалки —————
 function createSpinner(){
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
@@ -256,17 +282,17 @@ function createSpinner(){
   s.style.display = 'none';
   return s;
 }
-function appendMessage(author, text){
+function appendMessage(a,t){
   const d = document.createElement('div');
   d.className = 'chat-message';
-  d.innerHTML = `<strong>${author}:</strong> ${text}`;
+  d.innerHTML = `<strong>${a}:</strong> ${t}`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-function appendSystemMessage(text){
+function appendSystemMessage(t){
   const d = document.createElement('div');
   d.className = 'chat-message system-message';
-  d.innerHTML = `<em>${text}</em>`;
+  d.innerHTML = `<em>${t}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
