@@ -1,7 +1,10 @@
+// realtime.js
+
 const supabase = require('./supabase');
 
-// Глобальное состояние для всех комнат (player sync + owner)
-const roomsState = {}; // { [roomId]: { time, playing, speed, updatedAt, ownerId } }
+// Глобальный state для синхронизации плеера во всех комнатах
+// roomsState[roomId] = { time: Number, playing: Boolean, speed: Number, updatedAt: Number }
+const roomsState = {};
 
 module.exports = function(io) {
   io.on('connection', socket => {
@@ -15,120 +18,104 @@ module.exports = function(io) {
         userId      = userData.id;
         socket.join(roomId);
 
-        // --- Участник вошёл в комнату ---
-        await supabase.from('room_members')
-          .upsert({ room_id: roomId, user_id: userId }, { onConflict: ['room_id','user_id'] });
+        // Обновляем список участников в базе
+        await supabase
+          .from('room_members')
+          .upsert(
+            { room_id: roomId, user_id: userId },
+            { onConflict: ['room_id','user_id'] }
+          );
 
+        // Шлем всем обновленный список участников
         const { data: members } = await supabase
           .from('room_members')
           .select('user_id')
           .eq('room_id', roomId);
+
         io.to(roomId).emit('members', members);
 
+        // Системное сообщение о входе
         io.to(roomId).emit('system_message', {
-          text:       `Человек вошёл в комнату`,
+          text:       `Пользователь вошёл в комнату`,
           created_at: new Date().toISOString()
         });
 
+        // История чата
         const { data: messages } = await supabase
           .from('messages')
           .select('author, text, created_at')
           .eq('room_id', roomId)
           .order('created_at', { ascending: true });
+
         socket.emit('history', messages);
 
-        // --- Определяем owner комнаты ---
-        let ownerId = null;
-        // 1. Сначала — глобальный state
-        if (roomsState[roomId] && roomsState[roomId].ownerId) {
-          ownerId = roomsState[roomId].ownerId;
-        } else {
-          // 2. Потом — таблица rooms
-          const { data: room } = await supabase
-            .from('rooms')
-            .select('owner_id')
-            .eq('id', roomId)
-            .single();
-
-          if (!room?.owner_id) {
-            // ЕСЛИ owner_id отсутствует — присваиваем owner текущего юзера и пишем в БД
-            ownerId = userId;
-            await supabase
-              .from('rooms')
-              .update({ owner_id: userId })
-              .eq('id', roomId);
-          } else {
-            ownerId = room.owner_id;
-          }
-          if (!roomsState[roomId]) roomsState[roomId] = {};
-          roomsState[roomId].ownerId = ownerId;
+        // Инициализируем состояние плеера, если ещё не было
+        if (!roomsState[roomId]) {
+          roomsState[roomId] = {
+            time:      0,
+            playing:   false,
+            speed:     1,
+            updatedAt: Date.now()
+          };
         }
 
-        // ====== Важное! Если в памяти нет state — инициализируем ======
-        if (!roomsState[roomId].updatedAt) {
-          roomsState[roomId].time      = 0;
-          roomsState[roomId].playing   = false;
-          roomsState[roomId].speed     = 1;
-          roomsState[roomId].updatedAt = Date.now();
-        }
-
-        // Отправляем только что вошедшему sync_state с owner_id
+        // Отправляем новичку текущее состояние плеера
         const state = roomsState[roomId];
         socket.emit('sync_state', {
           position:  state.time,
           is_paused: !state.playing,
           speed:     state.speed,
-          updatedAt: state.updatedAt,
-          owner_id:  state.ownerId
+          updatedAt: state.updatedAt
         });
+
       } catch (err) {
-        console.error('Socket join error:', err.message);
+        console.error('Error on join:', err.message);
       }
     });
 
-    // ===== Синхронизация плеера (play/pause/seek) =====
-    socket.on('player_action', ({ roomId, position, is_paused, speed, updatedAt, userId }) => {
-      // Только owner может управлять плеером!
-      const ownerId = roomsState[roomId]?.ownerId;
-      if (!ownerId || userId !== ownerId) return;
-
-      const prev = roomsState[roomId] || {};
-      if (prev.updatedAt && updatedAt && prev.updatedAt >= updatedAt) {
-        return;
-      }
-
-      // ===== Сохраняем только если реально изменилось =====
-      roomsState[roomId] = {
-        time:      position,
-        playing:   !is_paused,
-        speed:     speed || 1,
-        updatedAt: updatedAt || Date.now(),
-        ownerId:   ownerId
-      };
-
-      // Шлём только не-owner'ам (owner не получает лишние обновления)
-      socket.to(roomId).emit('player_update', {
-        position,
-        is_paused,
-        speed: speed || 1,
-        updatedAt: roomsState[roomId].updatedAt,
-        owner_id:  ownerId
-      });
-    });
-
-    // ===== Получить актуальное состояние (после reconnection/request) =====
+    // ===== Получение актуального состояния по запросу =====
     socket.on('request_state', ({ roomId }) => {
-      const state = roomsState[roomId] || { time: 0, playing: false, speed: 1, updatedAt: Date.now(), ownerId: null };
+      const state = roomsState[roomId] || {
+        time:      0,
+        playing:   false,
+        speed:     1,
+        updatedAt: Date.now()
+      };
       socket.emit('sync_state', {
         position:  state.time,
         is_paused: !state.playing,
         speed:     state.speed,
-        updatedAt: state.updatedAt,
-        owner_id:  state.ownerId
+        updatedAt: state.updatedAt
       });
     });
 
-    // ====== Чат ======
+    // ===== Синхронизация действий плеера =====
+    socket.on('player_action', ({ roomId, position, is_paused, speed, updatedAt }) => {
+      const prev = roomsState[roomId] || {};
+
+      // Игнорируем устаревшие события
+      if (prev.updatedAt >= updatedAt) {
+        return;
+      }
+
+      // Сохраняем новое состояние
+      roomsState[roomId] = {
+        time:      position,
+        playing:   !is_paused,
+        speed:     speed || 1,
+        updatedAt: updatedAt
+      };
+
+      // Рассылаем обновление всем остальным
+      socket.to(roomId).emit('player_update', {
+        position,
+        is_paused,
+        speed:     speed || 1,
+        updatedAt
+      });
+    });
+
+    // ===== Чат =====
     socket.on('chat_message', async msg => {
       try {
         await supabase.from('messages').insert([{
@@ -136,35 +123,43 @@ module.exports = function(io) {
           author:  msg.author,
           text:    msg.text
         }]);
+
         io.to(msg.roomId).emit('chat_message', {
           author:     msg.author,
           text:       msg.text,
           created_at: new Date().toISOString()
         });
       } catch (err) {
-        console.error('chat_message error:', err.message);
+        console.error('Error on chat_message:', err.message);
       }
     });
 
-    // ===== Отключение =====
+    // ===== Отключение пользователя =====
     socket.on('disconnect', async () => {
       try {
         if (!currentRoom || !userId) return;
-        await supabase.from('room_members')
+
+        // Удаляем из списка участников
+        await supabase
+          .from('room_members')
           .delete()
           .match({ room_id: currentRoom, user_id: userId });
+
+        // Шлём всем обновлённый список участников
         const { data: members } = await supabase
           .from('room_members')
           .select('user_id')
           .eq('room_id', currentRoom);
+
         io.to(currentRoom).emit('members', members);
 
+        // Системное сообщение о выходе
         io.to(currentRoom).emit('system_message', {
-          text:       `Человек вышел из комнаты`,
+          text:       `Пользователь вышел из комнаты`,
           created_at: new Date().toISOString()
         });
       } catch (err) {
-        console.error('disconnect error:', err.message);
+        console.error('Error on disconnect:', err.message);
       }
     });
   });
