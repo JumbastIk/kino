@@ -1,13 +1,9 @@
 // room.js
 
-// 0) Подключите в <head> страницы:
-// <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-
 const BACKEND = location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
-// Socket.io для чата и списка участников
 const socket = io(BACKEND, {
   path: '/socket.io',
   transports: ['websocket']
@@ -27,20 +23,23 @@ const membersList   = document.getElementById('membersList');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
-let player, spinner, mqttClient;
-let isRemoteAction = false;
-let lastUpdate     = 0;
-let lastPing       = 0;
-let myUserId       = null;
-let initialSync    = null;
-let metadataReady  = false;
+let player;
+let isRemoteAction     = false;
+let lastUpdate         = 0;
+let myUserId           = null;
+let initialSync        = null;
+let syncTimeout        = null;
+let lastPing           = 0;
+let sendLock           = false;
+let localSeeking       = false;
+let wasPlayingBeforeSeek = false;
+let metadataReady      = false;
 
-// пороги
-const HARD_SYNC_THRESHOLD   = 0.3;
-const SOFT_SYNC_THRESHOLD   = 0.05;
-const AUTO_RESYNC_THRESHOLD = 1.0;
+// пороги синхронизации
+const HARD_SYNC_THRESHOLD   = 0.3;  // сек — мгновенный "скачок"
+const SOFT_SYNC_THRESHOLD   = 0.05; // сек — плавная подтяжка через playbackRate
 
-// 1) Меряем RTT по Socket.io
+// 1) меряем RTT раз в 10с
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -50,11 +49,24 @@ function measurePing() {
 }
 setInterval(measurePing, 10_000);
 
-// 2) Socket.io: чат + участники, затем стартуем MQTT и UI
+// 2) троттлинг отправки действий игрока
+function emitPlayerActionThrottled(isPaused) {
+  if (sendLock) return;
+  socket.emit('player_action', {
+    roomId,
+    position:  player.currentTime,
+    is_paused: isPaused,
+    speed:     player.playbackRate
+  });
+  sendLock = true;
+  setTimeout(() => sendLock = false, 150);
+}
+
+// 3) подключаемся, запрашиваем состояние и комнату
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
-  initMQTT();
+  socket.emit('request_state', { roomId });
   fetchRoom();
 });
 
@@ -62,7 +74,7 @@ socket.on('connect', () => {
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
-    `<ul>${ms.map(m=>`<li>${m.user_id}</li>`).join('')}</ul>`;
+    `<ul>${ms.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
@@ -70,47 +82,43 @@ socket.on('history', data => {
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
+
 sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => e.key==='Enter' && sendMessage());
+msgInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendMessage();
+});
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
-  socket.emit('chat_message', { roomId, author:'Гость', text:t });
+  socket.emit('chat_message', { roomId, author: 'Гость', text: t });
   msgInput.value = '';
 }
 
-// 3) Инициализация MQTT (QoS 2, retain, persistent session)
-function initMQTT() {
-  mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
-    clientId:     `client_${myUserId}`,
-    clean:        false,      // persistent session
-    reconnectPeriod: 1000,
-    connectTimeout: 4000
-  });
-
-  mqttClient.on('connect', () => {
-    // подписываемся на retained-тему с QoS 2
-    mqttClient.subscribe(`video/${roomId}`, { qos: 2 }, () => {
-      // сразу шлём свой state
-      publishState();
-    });
-  });
-
-  mqttClient.on('message', (_, payload) => {
-    try {
-      const msg = JSON.parse(payload.toString());
-      if (msg.roomId !== roomId) return;
-      if (msg.userId === myUserId) return;
-      initialSync = msg;
-      if (metadataReady) {
-        doSync(msg.position, msg.isPaused, msg.ts);
-        initialSync = null;
-      }
-    } catch {}
-  });
+// 4) приходы от сервера — синхронизируем
+function debouncedSync(pos, isPaused, serverTs) {
+  if (syncTimeout) clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(() => doSync(pos, isPaused, serverTs), 50);
 }
 
-// 4) Основная sync-логика
+socket.on('sync_state', d => {
+  if (!player) {
+    initialSync = d;
+  } else if (localSeeking) {
+    localSeeking = false;
+  } else {
+    debouncedSync(d.position, d.is_paused, d.updatedAt);
+  }
+});
+
+socket.on('player_update', d => {
+  if (localSeeking) {
+    localSeeking = false;
+  } else {
+    debouncedSync(d.position, d.is_paused, d.updatedAt);
+  }
+});
+
+// 5) собственно синхронизация
 function doSync(pos, isPaused, serverTs) {
   if (serverTs <= lastUpdate) return;
   lastUpdate = serverTs;
@@ -123,45 +131,42 @@ function doSync(pos, isPaused, serverTs) {
   const delta = target - player.currentTime;
   const absD  = Math.abs(delta);
 
-  if (absD > AUTO_RESYNC_THRESHOLD) publishState();
+  // скачок, если сильно рассинхрон
   if (absD > HARD_SYNC_THRESHOLD) {
     player.currentTime = target;
-  } else if (absD > SOFT_SYNC_THRESHOLD && !isPaused) {
+  }
+  // иначе плавная подстройка скорости
+  else if (absD > SOFT_SYNC_THRESHOLD && !isPaused) {
     player.playbackRate = Math.min(1.5, Math.max(0.5, 1 + delta * 0.5));
-  } else if (player.playbackRate !== 1) {
+  }
+  // возвращаем нормальную скорость
+  else if (player.playbackRate !== 1) {
     player.playbackRate = 1;
   }
 
-  if (isPaused && !player.paused)      player.pause();
-  else if (!isPaused && player.paused) player.play().catch(()=>{});
+  // синхронизируем паузу/плей
+  if (isPaused && !player.paused) {
+    player.pause();
+  } else if (!isPaused && player.paused) {
+    player.play().catch(() => {});
+  }
 
   setTimeout(() => {
     isRemoteAction = false;
-    if (player.playbackRate !== 1) player.playbackRate = 1;
-  }, 500);
+    if (player.playbackRate !== 1) {
+      player.playbackRate = 1;
+    }
+  }, 100);
 }
 
-// 5) Публикация state в MQTT
-function publishState() {
-  if (!mqttClient || !player) return;
-  const msg = {
-    roomId,
-    userId:   myUserId,
-    position: player.currentTime,
-    isPaused: player.paused,
-    speed:    player.playbackRate,
-    ts:       Date.now()
-  };
-  mqttClient.publish(`video/${roomId}`, JSON.stringify(msg), { qos: 2, retain: true });
-}
-
-// 6) Загрузка комнаты + UI + плеер
-async function fetchRoom(){
+// 6) загрузка комнаты и инициализация плеера
+async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(res.status);
-    const { movie_id } = await res.json();
-    const movie = movies.find(m=>m.id===movie_id);
+    const roomData = await res.json();
+
+    const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
@@ -169,120 +174,105 @@ async function fetchRoom(){
     const wrap = document.createElement('div');
     wrap.style.position = 'relative';
     wrap.innerHTML = `
-      <video id="videoPlayer" playsinline muted crossorigin="anonymous"
-             style="width:100%;border-radius:14px;background:#000"></video>
-      <div class="custom-controls">
-        <button id="btnPlay" class="control-btn">Play</button>
-        <input  id="seekBar" type="range" class="seek-bar" min="0" max="100" value="0">
-        <span   id="timeDisplay" class="time-display">00:00 / 00:00</span>
-      </div>
+      <video id="videoPlayer" controls autoplay muted playsinline crossorigin="anonymous"
+             style="width:100%;border-radius:14px"></video>
     `;
-    spinner = createSpinner();
-    wrap.appendChild(spinner);
+    wrap.appendChild(createSpinner());
     playerWrapper.appendChild(wrap);
 
-    // бейдж комнаты
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
       <small>ID комнаты:</small><code>${roomId}</code>
-      <button id="copyRoomId">Копировать</button>`;
+      <button id="copyRoomId">Копировать</button>
+    `;
     playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick = ()=>{
+    document.getElementById('copyRoomId').onclick = () => {
       navigator.clipboard.writeText(roomId);
       alert('Скопировано');
     };
 
-    const v       = document.getElementById('videoPlayer');
-    const playBtn = document.getElementById('btnPlay');
-    const seekBar = document.getElementById('seekBar');
-    const timeDisp= document.getElementById('timeDisplay');
+    const v = document.getElementById('videoPlayer');
+    spinner = wrap.querySelector('.buffer-spinner');
+    v.muted = true;
 
-    // HLS
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
-      v.addEventListener('waiting',  ()=>spinner.style.display='block');
-      v.addEventListener('playing', ()=>spinner.style.display='none');
+      v.addEventListener('waiting',  () => spinner.style.display = 'block');
+      v.addEventListener('playing', () => spinner.style.display = 'none');
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = movie.videoUrl;
     } else {
       throw new Error('HLS не поддерживается');
     }
 
-    // метаданные
-    v.addEventListener('loadedmetadata', ()=>{
+    v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
-      seekBar.max = v.duration;
-      updateTimeDisplay();
       if (initialSync) {
-        v.pause();
-        doSync(initialSync.position, initialSync.isPaused, initialSync.ts);
+        doSync(initialSync.position, initialSync.is_paused, initialSync.updatedAt);
         initialSync = null;
       }
     });
 
-    // апдейт прогресса
-    v.addEventListener('timeupdate', ()=>{
+    v.addEventListener('seeking', () => {
       if (!isRemoteAction) {
-        seekBar.value = v.currentTime;
-        updateTimeDisplay();
+        localSeeking = true;
+        wasPlayingBeforeSeek = !v.paused;
+        if (syncTimeout) clearTimeout(syncTimeout);
       }
     });
-    function updateTimeDisplay(){
-      const fmt = t=> {
-        const m = Math.floor(t/60), s = Math.floor(t%60);
-        return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-      };
-      timeDisp.textContent = `${fmt(v.currentTime)} / ${fmt(v.duration)}`;
-    }
 
-    // custom controls
-    playBtn.onclick = ()=>{
-      if (v.paused) v.play(); else v.pause();
-      publishState();
-    };
-    seekBar.oninput = ()=>{
-      v.currentTime = seekBar.value;
-      updateTimeDisplay();
-    };
-    seekBar.onchange = ()=>publishState();
+    v.addEventListener('seeked', () => {
+      if (!isRemoteAction) {
+        if (wasPlayingBeforeSeek) {
+          v.play().catch(() => {});
+          emitPlayerActionThrottled(false);
+        } else {
+          v.pause();
+          emitPlayerActionThrottled(true);
+        }
+      }
+    });
 
-    // фильтрация нативных событий
-    ['seeked','play','pause'].forEach(evt=>{
-      v.addEventListener(evt, e=>{
-        if (!e.isTrusted || isRemoteAction) return;
-        publishState();
-      });
+    v.addEventListener('play',  () => {
+      if (!isRemoteAction) emitPlayerActionThrottled(false);
+    });
+    v.addEventListener('pause', () => {
+      if (!isRemoteAction) emitPlayerActionThrottled(true);
     });
 
     player = v;
-  } catch(err) {
+  } catch (err) {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
-// — вспомогательные функции —
-function createSpinner(){
+function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
-  s.innerHTML = `<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
+  s.innerHTML = `
+    <div class="double-bounce1"></div>
+    <div class="double-bounce2"></div>
+  `;
   s.style.display = 'none';
   return s;
 }
-function appendMessage(a,t){
+
+function appendMessage(author, text) {
   const d = document.createElement('div');
   d.className = 'chat-message';
-  d.innerHTML = `<strong>${a}:</strong> ${t}`;
+  d.innerHTML = `<strong>${author}:</strong> ${text}`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-function appendSystemMessage(t){
+
+function appendSystemMessage(text) {
   const d = document.createElement('div');
   d.className = 'chat-message system-message';
-  d.innerHTML = `<em>${t}</em>`;
+  d.innerHTML = `<em>${text}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
