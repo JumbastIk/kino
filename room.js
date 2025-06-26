@@ -1,13 +1,13 @@
 // room.js
 
-// ————— 0) Подключите MQTT.js в <head> страницы:
+// 0) Подключите в <head> страницы:
 // <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
 const BACKEND = location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
 
-// Socket.io — только для чата и списка участников
+// Socket.io для чата и списка участников
 const socket = io(BACKEND, {
   path: '/socket.io',
   transports: ['websocket']
@@ -40,7 +40,7 @@ const HARD_SYNC_THRESHOLD   = 0.3;
 const SOFT_SYNC_THRESHOLD   = 0.05;
 const AUTO_RESYNC_THRESHOLD = 1.0;
 
-// 1) измеряем RTT
+// 1) Меряем RTT по Socket.io
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -50,15 +50,12 @@ function measurePing() {
 }
 setInterval(measurePing, 10_000);
 
-// 2) Socket.io: присоединяемся и стартуем MQTT + UI
+// 2) Socket.io: чат + участники, затем стартуем MQTT и UI
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   initMQTT();
   fetchRoom();
-});
-socket.on('reconnect', () => {
-  // при переподключении MQTT.js автоматически ретраит retained-сообщение
 });
 
 // чат и список участников
@@ -82,19 +79,19 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// 3) Инициализация MQTT (QoS 2, retained, persistent session)
+// 3) Инициализация MQTT (QoS 2, retain, persistent session)
 function initMQTT() {
-  mqttClient = mqtt.connect('wss://broker.hivemq.com:8000/mqtt', {
-    clientId: `client_${myUserId}`,
-    clean: false,               // persistent session
+  mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
+    clientId:     `client_${myUserId}`,
+    clean:        false,      // persistent session
     reconnectPeriod: 1000,
     connectTimeout: 4000
   });
 
   mqttClient.on('connect', () => {
-    // подписываемся с QoS 2 и сразу получаем last-retained
+    // подписываемся на retained-тему с QoS 2
     mqttClient.subscribe(`video/${roomId}`, { qos: 2 }, () => {
-      // сразу публикуем своё состояние, чтобы others получили retained
+      // сразу шлём свой state
       publishState();
     });
   });
@@ -120,16 +117,13 @@ function doSync(pos, isPaused, serverTs) {
   if (!player) return;
 
   isRemoteAction = true;
-  const now     = Date.now();
-  const drift  = (now - serverTs) - lastPing/2;
-  const target = isPaused ? pos : pos + drift/1000;
-  const delta  = target - player.currentTime;
-  const absD   = Math.abs(delta);
+  const now    = Date.now();
+  const drift = (now - serverTs) - lastPing/2;
+  const target= isPaused ? pos : pos + drift/1000;
+  const delta = target - player.currentTime;
+  const absD  = Math.abs(delta);
 
-  if (absD > AUTO_RESYNC_THRESHOLD) {
-    publishState(); // форсим пересинхронизацию
-  }
-
+  if (absD > AUTO_RESYNC_THRESHOLD) publishState();
   if (absD > HARD_SYNC_THRESHOLD) {
     player.currentTime = target;
   } else if (absD > SOFT_SYNC_THRESHOLD && !isPaused) {
@@ -138,7 +132,7 @@ function doSync(pos, isPaused, serverTs) {
     player.playbackRate = 1;
   }
 
-  if (isPaused && !player.paused) player.pause();
+  if (isPaused && !player.paused)      player.pause();
   else if (!isPaused && player.paused) player.play().catch(()=>{});
 
   setTimeout(() => {
@@ -147,7 +141,7 @@ function doSync(pos, isPaused, serverTs) {
   }, 500);
 }
 
-// 5) Публикация состояния в MQTT (QoS 2, retained)
+// 5) Публикация state в MQTT
 function publishState() {
   if (!mqttClient || !player) return;
   const msg = {
@@ -158,14 +152,10 @@ function publishState() {
     speed:    player.playbackRate,
     ts:       Date.now()
   };
-  mqttClient.publish(
-    `video/${roomId}`,
-    JSON.stringify(msg),
-    { qos: 2, retain: true }
-  );
+  mqttClient.publish(`video/${roomId}`, JSON.stringify(msg), { qos: 2, retain: true });
 }
 
-// 6) Загрузка комнаты и инициализация UI + плеера
+// 6) Загрузка комнаты + UI + плеер
 async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -233,7 +223,7 @@ async function fetchRoom(){
       }
     });
 
-    // обновление прогресса
+    // апдейт прогресса
     v.addEventListener('timeupdate', ()=>{
       if (!isRemoteAction) {
         seekBar.value = v.currentTime;
@@ -241,14 +231,14 @@ async function fetchRoom(){
       }
     });
     function updateTimeDisplay(){
-      const fmt = t=>{
-        const m=Math.floor(t/60), s=Math.floor(t%60);
+      const fmt = t=> {
+        const m = Math.floor(t/60), s = Math.floor(t%60);
         return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
       };
       timeDisp.textContent = `${fmt(v.currentTime)} / ${fmt(v.duration)}`;
     }
 
-    // собственные контролы
+    // custom controls
     playBtn.onclick = ()=>{
       if (v.paused) v.play(); else v.pause();
       publishState();
@@ -274,7 +264,7 @@ async function fetchRoom(){
   }
 }
 
-// ————— вспомогалки —————
+// — вспомогательные функции —
 function createSpinner(){
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
