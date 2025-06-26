@@ -2,14 +2,14 @@
 
 const supabase = require('./supabase');
 
-// Структура: roomsState[roomId] = { time, playing, speed, updatedAt }
+// Server-side state: roomsState[roomId] = { time, playing, speed, updatedAt }
 const roomsState      = {};
-// Таймеры для каждой комнаты
+// Broadcast timers per room
 const broadcastTimers = {};
-// Интервал между «прогнозными» рассылками (мс)
-const BROADCAST_INTERVAL = 5000;
+// Interval for background sync (ms)
+const BROADCAST_INTERVAL = 2000;
 
-// Запустить периодическую рассылку состояния
+// Start periodic broadcast of predicted state for a room
 function scheduleBroadcast(io, roomId) {
   if (broadcastTimers[roomId]) return;
   broadcastTimers[roomId] = setInterval(() => {
@@ -17,7 +17,6 @@ function scheduleBroadcast(io, roomId) {
     if (!s) return;
 
     const now     = Date.now();
-    // Прогноз позиции по последнему known-state
     const elapsed = (now - s.updatedAt) / 1000;
     const pos     = s.playing
       ? s.time + elapsed * s.speed
@@ -32,7 +31,7 @@ function scheduleBroadcast(io, roomId) {
   }, BROADCAST_INTERVAL);
 }
 
-// Очистить таймер и state, если в комнате никого не осталось
+// Stop broadcast when room is empty
 function clearBroadcast(io, roomId) {
   const room = io.sockets.adapter.rooms.get(roomId);
   if (!room || room.size === 0) {
@@ -47,14 +46,14 @@ module.exports = function(io) {
     let currentRoom = null;
     let userId      = null;
 
-    // ===== Пользователь заходит в комнату =====
+    // ===== User joins room =====
     socket.on('join', async ({ roomId, userData }) => {
       try {
         currentRoom = roomId;
         userId      = userData.id;
         socket.join(roomId);
 
-        // — обновляем таблицу участников —
+        // Update members table
         await supabase
           .from('room_members')
           .upsert(
@@ -62,20 +61,20 @@ module.exports = function(io) {
             { onConflict: ['room_id','user_id'] }
           );
 
-        // — рассылаем новый список участников —
+        // Broadcast updated members list
         const { data: members } = await supabase
           .from('room_members')
           .select('user_id')
           .eq('room_id', roomId);
         io.to(roomId).emit('members', members);
 
-        // — системное сообщение о входе —
+        // System join message
         io.to(roomId).emit('system_message', {
           text:       'Пользователь вошёл в комнату',
           created_at: new Date().toISOString()
         });
 
-        // — история чата —
+        // Chat history
         const { data: messages } = await supabase
           .from('messages')
           .select('author, text, created_at')
@@ -83,7 +82,7 @@ module.exports = function(io) {
           .order('created_at', { ascending: true });
         socket.emit('history', messages);
 
-        // — инициализируем state, если надо —
+        // Initialize room state if first
         if (!roomsState[roomId]) {
           roomsState[roomId] = {
             time:      0,
@@ -93,7 +92,7 @@ module.exports = function(io) {
           };
         }
 
-        // — моментальный отправляем текущее состояние —
+        // Immediately send current state
         const s = roomsState[roomId];
         socket.emit('sync_state', {
           position:  s.time,
@@ -102,7 +101,7 @@ module.exports = function(io) {
           updatedAt: s.updatedAt
         });
 
-        // — и запускаем/рестартуем периодическую рассылку —
+        // (Re)start background broadcast
         clearBroadcast(io, roomId);
         scheduleBroadcast(io, roomId);
 
@@ -111,7 +110,7 @@ module.exports = function(io) {
       }
     });
 
-    // ===== По запросу выдаём актуальное состояние =====
+    // ===== On explicit state request =====
     socket.on('request_state', ({ roomId }) => {
       const s = roomsState[roomId] || {
         time:      0,
@@ -127,16 +126,16 @@ module.exports = function(io) {
       });
     });
 
-    // ===== RTT-мерялка =====
+    // ===== Ping-pong for RTT =====
     socket.on('ping', () => {
       socket.emit('pong');
     });
 
-    // ===== Когда кто-то play/pause/seek =====
+    // ===== Handle play/pause/seek =====
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       const now = Date.now();
 
-      // Обновляем server-side state
+      // Update authoritative state
       roomsState[roomId] = {
         time:      position,
         playing:   !is_paused,
@@ -144,7 +143,7 @@ module.exports = function(io) {
         updatedAt: now
       };
 
-      // Моментально сообщаем *всем* (включая отправителя)
+      // Immediately broadcast to all
       io.to(roomId).emit('player_update', {
         position,
         is_paused,
@@ -152,12 +151,12 @@ module.exports = function(io) {
         updatedAt: now
       });
 
-      // Рестартуем периодическую рассылку, чтобы не прилетел старый «прогноз»
+      // Reset background broadcast timer
       clearBroadcast(io, roomId);
       scheduleBroadcast(io, roomId);
     });
 
-    // ===== Чат =====
+    // ===== Chat messages =====
     socket.on('chat_message', async msg => {
       try {
         await supabase.from('messages').insert([{
@@ -175,7 +174,7 @@ module.exports = function(io) {
       }
     });
 
-    // ===== Выход пользователя =====
+    // ===== User disconnects =====
     socket.on('disconnect', async () => {
       try {
         if (!currentRoom || !userId) return;
@@ -192,11 +191,10 @@ module.exports = function(io) {
         io.to(currentRoom).emit('members', members);
 
         io.to(currentRoom).emit('system_message', {
-          text:       'Пользователь вышел из комнате',
+          text:       'Пользователь вышел из комнаты',
           created_at: new Date().toISOString()
         });
 
-        // Если комната пуста — чистим state и таймер
         clearBroadcast(io, currentRoom);
       } catch (err) {
         console.error('Error on disconnect:', err.message);

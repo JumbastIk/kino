@@ -25,21 +25,21 @@ const sendBtn       = document.getElementById('sendBtn');
 
 let player;
 let spinner;
-let isRemoteAction     = false;
-let lastUpdate         = 0;
-let lastPing           = 0;
-let myUserId           = null;
-let initialSync        = null;
-let syncTimeout        = null;
-let metadataReady      = false;
-let sendLock           = false;
+let isRemoteAction = false;
+let lastUpdate     = 0;
+let lastPing       = 0;
+let myUserId       = null;
+let initialSync    = null;
+let syncTimeout    = null;
+let metadataReady  = false;
+let sendLock       = false;
 
-// thresholds
-const HARD_SYNC_THRESHOLD   = 0.3;   // мгновенный jump
+// Пороги синхронизации
+const HARD_SYNC_THRESHOLD   = 0.3;   // мгновенный прыжок, сек
 const SOFT_SYNC_THRESHOLD   = 0.05;  // плавная подтяжка
-const AUTO_RESYNC_THRESHOLD = 1.0;   // запрос fresh-state
+const AUTO_RESYNC_THRESHOLD = 1.0;   // запрос fresh-state, сек
 
-// 1) измеряем RTT
+// 1) Измеряем RTT каждые 10 с
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -47,9 +47,9 @@ function measurePing() {
     lastPing = Date.now() - t0;
   });
 }
-setInterval(measurePing, 10_000);
+setInterval(measurePing, 10000);
 
-// 2) при connect/join
+// 2) При подключении запрашиваем состояние и инициализируем плеер
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join',          { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -60,7 +60,7 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 
-// чат и участники
+// 3) Чат и список участников
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
@@ -73,7 +73,7 @@ socket.on('history', data => {
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
 sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => { if (e.key==='Enter') sendMessage() });
+msgInput.addEventListener('keydown', e => { if (e.key==='Enter') sendMessage(); });
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
@@ -81,21 +81,20 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// 3) приход от сервера
-socket.on('sync_state',   d => handleIncoming(d));
-socket.on('player_update',d => handleIncoming(d));
-
-function handleIncoming(d) {
+// 4) Приём серверных sync события
+socket.on('sync_state',    d => scheduleSync(d));
+socket.on('player_update', d => scheduleSync(d));
+function scheduleSync(d) {
   initialSync = d;
   if (metadataReady) {
     clearTimeout(syncTimeout);
-    syncTimeout = setTimeout(() => doSync(d.position, d.is_paused, d.updatedAt), 50);
+    syncTimeout = setTimeout(() => doSync(d), 50);
     initialSync = null;
   }
 }
 
-// 4) main sync
-function doSync(pos, isPaused, serverTs) {
+// 5) Алгоритм коррекции
+function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   if (serverTs <= lastUpdate) return;
   lastUpdate = serverTs;
   if (!player) return;
@@ -107,32 +106,39 @@ function doSync(pos, isPaused, serverTs) {
   const delta = target - player.currentTime;
   const absD  = Math.abs(delta);
 
-  // слишком далеко — запрос fresh
+  // 5.1) Если больше AUTO_RESYNC_THRESHOLD — запрос fresh-state
   if (absD > AUTO_RESYNC_THRESHOLD) {
     socket.emit('request_state', { roomId });
   }
 
+  // 5.2) Жёсткий перескок
   if (absD > HARD_SYNC_THRESHOLD) {
     player.currentTime = target;
-  } else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
+  }
+  // 5.3) Плавная подтяжка скоростью
+  else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
     player.playbackRate = 1 + delta * 0.5;
-  } else if (player.playbackRate !== 1) {
+  }
+  // 5.4) Восстановление обычной скорости
+  else if (player.playbackRate !== 1) {
     player.playbackRate = 1;
   }
 
-  if (isPaused && !player.paused) {
-    player.pause();
-  } else if (!isPaused && player.paused) {
-    player.play().catch(()=>{});
+  // 5.5) Синхронизация play/pause
+  if (isPaused) {
+    if (!player.paused) player.pause();
+  } else {
+    if (player.paused) player.play().catch(()=>{});
   }
 
+  // 5.6) Снятие флага remote-action
   setTimeout(() => {
     isRemoteAction = false;
     if (player.playbackRate !== 1) player.playbackRate = 1;
-  }, 50);
+  }, 20);
 }
 
-// 5) fetchRoom + init player
+// 6) Загрузка комнаты и инициализация плеера
 async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -140,8 +146,11 @@ async function fetchRoom(){
     const { movie_id } = await res.json();
     const movie = movies.find(m=>m.id===movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
+
+    // back-link
     backLink.href = `${movie.html}?id=${movie.id}`;
 
+    // обёртка плеера
     playerWrapper.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.style.position = 'relative';
@@ -153,7 +162,7 @@ async function fetchRoom(){
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
-    // badge roomId
+    // бейдж с roomId
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -166,8 +175,8 @@ async function fetchRoom(){
       alert('Скопировано');
     };
 
+    // инициализация HLS
     const v = document.getElementById('videoPlayer');
-    v.muted = true;
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
@@ -176,39 +185,38 @@ async function fetchRoom(){
       v.addEventListener('playing', ()=>spinner.style.display='none');
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = movie.videoUrl;
-    } else throw new Error('HLS не поддерживается');
+    } else {
+      throw new Error('HLS не поддерживается');
+    }
 
+    // ждём метаданных для initialSync
     v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       if (initialSync) {
-        doSync(initialSync.position, initialSync.is_paused, initialSync.updatedAt);
+        doSync(initialSync);
         initialSync = null;
       }
     });
 
-    // throttle эмита
+    // функция отправки действий с throttle
     function emitAction(paused) {
       if (sendLock) return;
       socket.emit('player_action', {
         roomId,
-        position: v.currentTime,
+        position:  v.currentTime,
         is_paused: paused,
-        speed: v.playbackRate
+        speed:     v.playbackRate
       });
       sendLock = true;
       setTimeout(()=> sendLock = false, 150);
     }
 
-    // события пользователя
+    // пользовательские события
     v.addEventListener('seeking', () => {
-      if (!isRemoteAction) {
-        // ничего не шлём пока ищем...
-      }
+      // ждём seeked
     });
     v.addEventListener('seeked', () => {
-      if (!isRemoteAction) {
-        emitAction(v.paused);
-      }
+      if (!isRemoteAction) emitAction(v.paused);
     });
     v.addEventListener('play', () => {
       if (!isRemoteAction) emitAction(false);
@@ -218,12 +226,14 @@ async function fetchRoom(){
     });
 
     player = v;
+
   } catch(err) {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
+// Вспомогательные функции
 function createSpinner(){
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
@@ -231,18 +241,17 @@ function createSpinner(){
   s.style.display = 'none';
   return s;
 }
-
-function appendMessage(a,t){
+function appendMessage(author, text){
   const d = document.createElement('div');
   d.className = 'chat-message';
-  d.innerHTML = `<strong>${a}:</strong> ${t}`;
+  d.innerHTML = `<strong>${author}:</strong> ${text}`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-function appendSystemMessage(t){
+function appendSystemMessage(text){
   const d = document.createElement('div');
   d.className = 'chat-message system-message';
-  d.innerHTML = `<em>${t}</em>`;
+  d.innerHTML = `<em>${text}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
