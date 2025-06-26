@@ -24,22 +24,18 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player;
-let isRemoteAction       = false;
-let lastUpdate           = 0;
-let myUserId             = null;
-let initialSync          = null;
-let syncTimeout          = null;
-let lastPing             = 0;
-let sendLock             = false;
-let localSeeking         = false;
-let wasPlayingBeforeSeek = false;
+let isRemoteAction = false;
+let lastUpdate     = 0;
+let lastPing       = 0;
+let myUserId       = null;
+let initialSync    = null;
 
 // пороги синхронизации
-const HARD_SYNC_THRESHOLD = 0.3;  // сек — мгновенный "скачок"
-const SOFT_SYNC_THRESHOLD = 0.05; // сек — плавная подтяжка через playbackRate
+const HARD_SYNC_THRESHOLD = 0.3;  // сек — мгновенный перепрыг
+const SOFT_SYNC_THRESHOLD = 0.05; // сек — подтяжка через playbackRate
 
 // ==========================
-// 1) меряем RTT
+// 1) меряем RTT для drift-коррекции
 // ==========================
 function measurePing() {
   const t0 = Date.now();
@@ -51,46 +47,33 @@ function measurePing() {
 setInterval(measurePing, 10_000);
 
 // ==========================
-// 2) троттлим отправку действий
-// ==========================
-function emitPlayerActionThrottled(isPaused) {
-  if (sendLock) return;
-  socket.emit('player_action', {
-    roomId,
-    position:  player.currentTime,
-    is_paused: isPaused,
-    speed:     player.playbackRate
-  });
-  sendLock = true;
-  setTimeout(() => sendLock = false, 150);
-}
-
-// ==========================
-// 3) подключились
+// 2) при connect запрашиваем комнату и состояние
 // ==========================
 socket.on('connect', () => {
   myUserId = socket.id;
-  socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
+  socket.emit('join',        { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 
 // ==========================
-// 4) чат и участники (без изменений)
+// 3) чат и участники (без изменений)
 // ==========================
 socket.on('members', ms => {
   membersList.innerHTML =
-    `<div class="chat-members-label">Участники (${ms.length}):</div>` +
+    `<div class="chat-members-label">Участники (${ms.length}):</div>`+
     `<ul>${ms.map(m=>`<li>${m.user_id}</li>`).join('')}</ul>`;
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
 });
-socket.on('chat_message', m => appendMessage(m.author, m.text));
+socket.on('chat_message',   m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
+
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => e.key==='Enter' && sendMessage());
+
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
@@ -99,15 +82,18 @@ function sendMessage() {
 }
 
 // ==========================
-// 5) синхронизация с учётом пинга и drift-коррекции
+// 4) сразу применяем все входящие обновления
 // ==========================
-function debouncedSync(pos, isPaused, serverTs) {
-  if (syncTimeout) clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(pos, isPaused, serverTs), 50);
-}
+socket.on('sync_state',   d => { initialSync = d; });
+socket.on('player_update', d => {
+  doSync(d.position, d.is_paused, d.updatedAt);
+});
 
+// ==========================
+// 5) основная синхронизация
+// ==========================
 function doSync(pos, isPaused, serverTs) {
-  if (serverTs < lastUpdate) return;
+  if (serverTs <= lastUpdate) return;
   lastUpdate = serverTs;
   if (!player) return;
   isRemoteAction = true;
@@ -118,40 +104,29 @@ function doSync(pos, isPaused, serverTs) {
   const delta   = target - player.currentTime;
   const absD    = Math.abs(delta);
 
-  // 1) если рассинхрон большой — мгновенно прыгнуть
+  // 1) большой рассинхрон — мгновенный перепрыг
   if (absD > HARD_SYNC_THRESHOLD) {
     player.currentTime = target;
   }
-  // 2) если средний — плавно подтянуть скоростью
+  // 2) средний — подтягиваем скоростью
   else if (absD > SOFT_SYNC_THRESHOLD && !isPaused) {
     player.playbackRate = Math.min(1.5, Math.max(0.5, 1 + delta * 0.5));
   }
-  // 3) иначе вернуть нормальную скорость
+  // 3) иначе — возвращаем нормальную скорость
   else if (player.playbackRate !== 1) {
     player.playbackRate = 1;
   }
 
-  // 4) синхронизируем play/pause
-  if (isPaused && !player.paused) {
-    player.pause();
-  } else if (!isPaused && player.paused) {
-    player.play().catch(()=>{});
-  }
+  // 4) play/pause точно по серверному флагу
+  if (isPaused && !player.paused)      player.pause();
+  else if (!isPaused && player.paused) player.play().catch(()=>{});
 
-  // удерживаем флаг чуть дольше, чтобы перекрыть все события
-  setTimeout(() => { isRemoteAction = false; }, 500);
+  // ждём, пока все внутренние события отработают
+  setTimeout(() => {
+    isRemoteAction = false;
+    if (player.playbackRate !== 1) player.playbackRate = 1;
+  }, 500);
 }
-
-socket.on('sync_state', d => {
-  initialSync = d;
-});
-socket.on('player_update', d => {
-  if (localSeeking) {
-    localSeeking = false;
-  } else {
-    debouncedSync(d.position, d.is_paused, d.updatedAt);
-  }
-});
 
 // ==========================
 // 6) загрузка комнаты и инициализация плеера
@@ -160,10 +135,9 @@ async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(res.status);
-    const roomData = await res.json();
-
-    const movie = movies.find(m => m.id === roomData.movie_id);
-    if (!movie?.videoUrl) throw new Error('Фильм не найден');
+    const { movie_id } = await res.json();
+    const movie = movies.find(m => m.id === movie_id);
+    if (!movie || !movie.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
     playerWrapper.innerHTML = '';
@@ -177,7 +151,7 @@ async function fetchRoom(){
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
-    // секция с ID комнаты
+    // секция с ID комнаты (как было)
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -192,6 +166,7 @@ async function fetchRoom(){
     const v = document.getElementById('videoPlayer');
     v.muted = true;
 
+    // HLS
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
@@ -212,40 +187,40 @@ async function fetchRoom(){
       }
     });
 
-    // фильтруем только реальные пользовательские seeks
+    // ========== события пользователя ==========
+    // игнорируем скриптовые seeks/plays/pauses
     v.addEventListener('seeking', e => {
       if (!e.isTrusted || isRemoteAction) return;
-      localSeeking = true;
-      wasPlayingBeforeSeek = !v.paused;
-      if (syncTimeout) clearTimeout(syncTimeout);
     });
     v.addEventListener('seeked', e => {
       if (!e.isTrusted || isRemoteAction) return;
-      localSeeking = false;
-      if (wasPlayingBeforeSeek) {
-        v.play().catch(() => {});
-        emitPlayerActionThrottled(false);
-      } else {
-        v.pause();
-        emitPlayerActionThrottled(true);
-      }
-    });
-
-    // игнорируем native pause во время seek
-    v.addEventListener('pause', e => {
-      if (!e.isTrusted || isRemoteAction || localSeeking) return;
-      emitPlayerActionThrottled(true);
+      sendPlayerAction();
     });
     v.addEventListener('play', e => {
       if (!e.isTrusted || isRemoteAction) return;
-      emitPlayerActionThrottled(false);
+      sendPlayerAction();
+    });
+    v.addEventListener('pause', e => {
+      if (!e.isTrusted || isRemoteAction) return;
+      sendPlayerAction();
     });
 
     player = v;
+
   } catch(err) {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
+}
+
+// вспомогательные функции
+function sendPlayerAction() {
+  socket.emit('player_action', {
+    roomId,
+    position:  player.currentTime,
+    is_paused: player.paused,
+    speed:     player.playbackRate
+  });
 }
 
 function createSpinner(){
@@ -255,7 +230,6 @@ function createSpinner(){
   s.style.display = 'none';
   return s;
 }
-
 function appendMessage(author, text){
   const d = document.createElement('div');
   d.className = 'chat-message';
