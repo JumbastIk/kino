@@ -33,7 +33,13 @@ let syncTimeout    = null;
 let lastPing   = 0;
 let sendLock   = false;
 
+// === добавлено для подавления входящих sync во время локальной перемотки ===
+let localSeeking   = false;
+let seekingTimeout = null;
+
+//
 // 1) Меряем RTT
+//
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -43,7 +49,9 @@ function measurePing() {
 }
 setInterval(measurePing, 10_000);
 
+//
 // 2) Троттлим отправку действий
+//
 function emitPlayerActionThrottled(isPaused) {
   if (sendLock) return;
   socket.emit('player_action', {
@@ -53,10 +61,12 @@ function emitPlayerActionThrottled(isPaused) {
     speed:     player.playbackRate
   });
   sendLock = true;
-  setTimeout(() => sendLock = false, 150); // 150 мс очень мало заметно
+  setTimeout(() => sendLock = false, 150);
 }
 
+//
 // 3) Подключаемся и синхронизируем
+//
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -64,7 +74,9 @@ socket.on('connect', () => {
   fetchRoom();
 });
 
+//
 // Chat & members
+//
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>
@@ -77,12 +89,16 @@ socket.on('history', data => {
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
 
+//
 // ping/pong
+//
 socket.on('pong', () => {
   // сюда приходит, но мы используем socket.once в measurePing
 });
 
+//
 // send chat
+//
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => e.key==='Enter' && sendMessage());
 function sendMessage() {
@@ -92,12 +108,14 @@ function sendMessage() {
   msgInput.value = '';
 }
 
+//
 // 4) Sync с учётом пинга и прогнозом
+//
 function debouncedSync(pos, isPaused, serverTs) {
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(()=>{
     doSync(pos, isPaused, serverTs);
-  }, 50); // 50 мс дебаунс
+  }, 50);
 }
 
 function doSync(pos, isPaused, serverTs) {
@@ -107,29 +125,20 @@ function doSync(pos, isPaused, serverTs) {
   isRemoteAction = true;
 
   const now      = Date.now();
-  // корректируем на половину RTT
   const driftMs  = (now - serverTs) - lastPing/2;
-  // если видео играет — прогнозируем новую позицию
-  const target   = isPaused
-    ? pos
-    : pos + driftMs/1000;
-
+  const target   = isPaused ? pos : pos + driftMs/1000;
   const delta    = target - player.currentTime;
   const absDelta = Math.abs(delta);
 
-  // 1) резкий seek > 1s
   if (absDelta > 1) {
     player.currentTime = target;
-  }
-  // 2) маленький дрейф 0.05–1s — покрутим скорость
-  else if (absDelta > 0.05) {
+  } else if (absDelta > 0.05) {
     player.playbackRate = delta > 0 ? 1.05 : 0.95;
     setTimeout(() => {
       if (player) player.playbackRate = 1;
     }, 500);
   }
 
-  // 3) пауза/плей
   if (isPaused && !player.paused) {
     player.pause();
   } else if (!isPaused && player.paused) {
@@ -141,19 +150,26 @@ function doSync(pos, isPaused, serverTs) {
     });
   }
 
-  // сброс флага
   setTimeout(() => isRemoteAction = false, 100);
 }
 
+// теперь игнорируем входящие sync, если локально перематываем
 socket.on('sync_state', d => {
-  if (!player) initialSync = d;
-  else           debouncedSync(d.position, d.is_paused, d.updatedAt);
+  if (!player) {
+    initialSync = d;
+  } else if (!localSeeking) {
+    debouncedSync(d.position, d.is_paused, d.updatedAt);
+  }
 });
 socket.on('player_update', d => {
-  debouncedSync(d.position, d.is_paused, d.updatedAt);
+  if (!localSeeking) {
+    debouncedSync(d.position, d.is_paused, d.updatedAt);
+  }
 });
 
-// Инициализация плеера (без изменений, только привязываем throttled emit)
+//
+// Инициализация плеера (без изменений, только доп. события seeking/seeked)
+//
 async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -174,7 +190,6 @@ async function fetchRoom(){
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
-    // бейдж и копировака
     const badge = document.createElement('div');
     badge.className='room-id-badge';
     badge.innerHTML=`
@@ -208,10 +223,31 @@ async function fetchRoom(){
       }
     });
 
-    // сюда привязываем throttled emit
+    // === новый обработчик для начала локальной перемотки ===
+    v.addEventListener('seeking', () => {
+      if (!isRemoteAction) {
+        localSeeking = true;
+        // сбрасываем любой запланированный remote sync
+        if (syncTimeout) {
+          clearTimeout(syncTimeout);
+          syncTimeout = null;
+        }
+      }
+    });
+
+    // === изменённый обработчик seeked: emit + сброс localSeeking через 300ms ===
+    v.addEventListener('seeked', () => {
+      if (!isRemoteAction) {
+        emitPlayerActionThrottled(v.paused);
+        if (seekingTimeout) clearTimeout(seekingTimeout);
+        seekingTimeout = setTimeout(() => {
+          localSeeking = false;
+        }, 300);
+      }
+    });
+
     v.addEventListener('play',   () => { if (!isRemoteAction) emitPlayerActionThrottled(false); });
     v.addEventListener('pause',  () => { if (!isRemoteAction) emitPlayerActionThrottled(true); });
-    v.addEventListener('seeked', () => { if (!isRemoteAction) emitPlayerActionThrottled(v.paused); });
 
     player = v;
 
