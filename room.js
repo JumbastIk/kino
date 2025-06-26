@@ -34,133 +34,95 @@ let lastPing         = 0;
 let sendLock         = false;
 let lastLocalAction  = 0;
 
-// 1) Измеряем RTT
+// измеряем RTT
 function measurePing() {
-  try {
-    const t0 = Date.now();
-    socket.emit('ping');
-    socket.once('pong', () => {
-      lastPing = Date.now() - t0;
-    });
-  } catch (err) {
-    console.error('Ping error', err);
-  }
+  const t0 = Date.now();
+  socket.emit('ping');
+  socket.once('pong', () => {
+    lastPing = Date.now() - t0;
+  });
 }
-setInterval(measurePing, 10_000);
+setInterval(measurePing, 10000);
 
-// 2) Троттлим отправку действий и запоминаем время локального события
-function emitPlayerActionThrottled(isPaused) {
+// throttle и пометка локального действия
+function emitAction(isPaused) {
   if (sendLock || !player) return;
   lastLocalAction = Date.now();
-  try {
-    socket.emit('player_action', {
-      roomId,
-      position:  player.currentTime,
-      is_paused: isPaused,
-      speed:     player.playbackRate
-    });
-  } catch (err) {
-    console.error('Emit action error', err);
-  }
+  socket.emit('player_action', {
+    roomId,
+    position:  player.currentTime,
+    is_paused: isPaused,
+    speed:     player.playbackRate
+  });
   sendLock = true;
   setTimeout(() => sendLock = false, 150);
 }
 
-// 3) Обработка базовых socket-событий
+// socket events
 socket.on('connect', () => {
   myUserId = socket.id;
-  socket.emit('join',     { roomId, userData: { id: myUserId, first_name: 'Гость' } });
+  socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 
 socket.on('members', ms => {
-  try {
-    membersList.innerHTML =
-      `<div class="chat-members-label">Участники (${ms.length}):</div>
-       <ul>${ms.map(m=>`<li>${m.user_id}</li>`).join('')}</ul>`;
-  } catch (err) {
-    console.error('Members render error', err);
-  }
+  membersList.innerHTML =
+    `<div class="chat-members-label">Участники (${ms.length}):</div>
+     <ul>${ms.map(m=>`<li>${m.user_id}</li>`).join('')}</ul>`;
 });
-
 socket.on('history', data => {
-  try {
-    messagesBox.innerHTML = '';
-    data.forEach(m => appendMessage(m.author, m.text));
-  } catch (err) {
-    console.error('History render error', err);
-  }
+  messagesBox.innerHTML = '';
+  data.forEach(m => appendMessage(m.author, m.text));
 });
-
-socket.on('chat_message', m => {
-  try { appendMessage(m.author, m.text); }
-  catch (err) { console.error('Chat message render error', err); }
-});
-
-socket.on('system_message', msg => {
-  if (msg?.text) {
-    try { appendSystemMessage(msg.text); }
-    catch (err) { console.error('System message error', err); }
-  }
-});
-
-socket.on('pong', () => {});  // нужно для measurePing
-
-// при ошибке соединения – пробуем восстановить
-socket.on('error', err => {
-  console.error('Socket error', err);
+socket.on('chat_message', m => appendMessage(m.author, m.text));
+socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
+socket.on('pong', () => {});
+socket.on('error', () => {
+  // при ошибке попробуем пересинхронизироваться
   setTimeout(() => socket.emit('request_state', { roomId }), 1000);
 });
 
-// 4) Синхронизация с учётом пинга, прогноза и локальных действий
+// синхронизация
 function debouncedSync(pos, isPaused, serverTs) {
-  if (syncTimeout) clearTimeout(syncTimeout);
+  clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
-    try {
-      doSync(pos, isPaused, serverTs);
-    } catch (err) {
-      console.error('Sync error', err);
-      socket.emit('request_state', { roomId });
-    }
+    doSync(pos, isPaused, serverTs);
   }, 50);
 }
 
 function doSync(pos, isPaused, serverTs) {
-  // Игнорируем «эхо» сразу после нашего действия
+  // игнорируем эхо сразу после локального seek/play/pause
   if (serverTs <= lastLocalAction + 500) return;
-  // Игнорируем старые обновления
+  // игнорируем старые
   if (serverTs < lastUpdate) return;
   lastUpdate = serverTs;
   if (!player) return;
-
   isRemoteAction = true;
 
-  // Прогнозируем позицию
-  const now     = Date.now();
-  const drift  = (now - serverTs) - lastPing / 2;
+  // прогноз позиции
+  const now   = Date.now();
+  const drift= (now - serverTs) - lastPing/2;
   const target = isPaused
     ? pos
-    : pos + drift / 1000;
+    : pos + drift/1000;
 
-  const delta    = target - player.currentTime;
-  const absDelta = Math.abs(delta);
+  const delta = target - player.currentTime;
+  const abs   = Math.abs(delta);
 
-  // Жесткий seek
-  if (absDelta > 1) {
+  if (abs > 1) {
     player.currentTime = target;
-  }
-  // Мягкая подгонка скорости
-  else if (absDelta > 0.05) {
+  } else if (abs > 0.05) {
     player.playbackRate = delta > 0 ? 1.05 : 0.95;
-    setTimeout(() => {
-      if (player) player.playbackRate = 1;
-    }, 500);
+    setTimeout(() => { if (player) player.playbackRate = 1; }, 500);
   }
 
-  // Пауза/плей: не занижаем в паузу, если локально идёт воспроизведение после seek
+  // если сервер говорит pause, но это эхо после локального seek/play — пропускаем
   if (isPaused) {
-    if (!player.paused) player.pause();
+    // только если прошло >500 мс после нашего действия
+    if (Date.now() > lastLocalAction + 500 && !player.paused) {
+      player.pause();
+    }
   } else {
     if (player.paused) {
       player.play().catch(() => {
@@ -179,26 +141,35 @@ socket.on('sync_state', d => {
   if (!player) initialSync = d;
   else           debouncedSync(d.position, d.is_paused, d.updatedAt);
 });
-
 socket.on('player_update', d => {
   debouncedSync(d.position, d.is_paused, d.updatedAt);
 });
 
-// 5) Инициализация плеера с привязкой throttled-emit
+// чат
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => e.key==='Enter' && sendMessage());
+function sendMessage() {
+  const t = msgInput.value.trim();
+  if (!t) return;
+  socket.emit('chat_message', { roomId, author:'Гость', text:t });
+  msgInput.value = '';
+}
+
+// инициализация плеера
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
-    if (!res.ok) throw new Error(`Status ${res.status}`);
+    if (!res.ok) throw new Error(res.status);
     const roomData = await res.json();
 
-    const movie = movies.find(m => m.id === roomData.movie_id);
+    const movie = movies.find(m=>m.id===roomData.movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
     playerWrapper.innerHTML = '';
     const wrap = document.createElement('div');
-    wrap.style.position = 'relative';
-    wrap.innerHTML = `
+    wrap.style.position='relative';
+    wrap.innerHTML=`
       <video id="videoPlayer" controls crossorigin="anonymous" playsinline
              style="width:100%;border-radius:14px"></video>`;
     const spinner = createSpinner();
@@ -206,13 +177,12 @@ async function fetchRoom() {
     playerWrapper.appendChild(wrap);
 
     const badge = document.createElement('div');
-    badge.className = 'room-id-badge';
-    badge.innerHTML = `
-      <small>ID комнаты:</small>
-      <code>${roomId}</code>
+    badge.className='room-id-badge';
+    badge.innerHTML=`
+      <small>ID комнаты:</small><code>${roomId}</code>
       <button id="copyRoomId">Копировать</button>`;
     playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick = () => {
+    document.getElementById('copyRoomId').onclick=()=>{
       navigator.clipboard.writeText(roomId);
       alert('Скопировано');
     };
@@ -222,13 +192,11 @@ async function fetchRoom() {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
-      v.addEventListener('waiting', () => spinner.style.display = 'block');
-      v.addEventListener('playing', () => spinner.style.display = 'none');
+      v.addEventListener('waiting', ()=>spinner.style.display='block');
+      v.addEventListener('playing',()=>spinner.style.display='none');
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-      v.src = movie.videoUrl;
-    } else {
-      throw new Error('HLS не поддерживается');
-    }
+      v.src=movie.videoUrl;
+    } else throw new Error('HLS не поддерживается');
 
     v.addEventListener('loadedmetadata', () => {
       if (initialSync) {
@@ -241,19 +209,18 @@ async function fetchRoom() {
       }
     });
 
-    v.addEventListener('play',   () => { if (!isRemoteAction) emitPlayerActionThrottled(false); });
-    v.addEventListener('pause',  () => { if (!isRemoteAction) emitPlayerActionThrottled(true); });
-    v.addEventListener('seeked', () => { if (!isRemoteAction) emitPlayerActionThrottled(v.paused); });
+    v.addEventListener('play',   () => { if (!isRemoteAction) emitAction(false); });
+    v.addEventListener('pause',  () => { if (!isRemoteAction) emitAction(true); });
+    v.addEventListener('seeked', () => { if (!isRemoteAction) emitAction(v.paused); });
 
     player = v;
-
   } catch (err) {
     console.error('FetchRoom error', err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
-function createSpinner() {
+function createSpinner(){
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
   s.innerHTML = `<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
@@ -261,18 +228,17 @@ function createSpinner() {
   return s;
 }
 
-function appendMessage(author, text) {
+function appendMessage(a,t){
   const d = document.createElement('div');
   d.className = 'chat-message';
-  d.innerHTML = `<strong>${author}:</strong> ${text}`;
+  d.innerHTML = `<strong>${a}:</strong> ${t}`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-
-function appendSystemMessage(text) {
+function appendSystemMessage(t){
   const d = document.createElement('div');
   d.className = 'chat-message system-message';
-  d.innerHTML = `<em>${text}</em>`;
+  d.innerHTML = `<em>${t}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
