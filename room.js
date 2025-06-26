@@ -30,12 +30,11 @@ let myUserId       = null;
 let initialSync    = null;
 let syncTimeout    = null;
 
-let lastPing   = 0;
-let sendLock   = false;
+let lastPing       = 0;
+let sendLock       = false;
 
-// === добавлено для подавления входящих sync во время локальной перемотки ===
-let localSeeking   = false;
-let seekingTimeout = null;
+// Флаг: после локальной seek-операции игнорируем 1-е входящее sync
+let localSeeking = false;
 
 //
 // 1) Меряем RTT
@@ -88,13 +87,6 @@ socket.on('history', data => {
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
-
-//
-// ping/pong
-//
-socket.on('pong', () => {
-  // сюда приходит, но мы используем socket.once в measurePing
-});
 
 //
 // send chat
@@ -153,22 +145,26 @@ function doSync(pos, isPaused, serverTs) {
   setTimeout(() => isRemoteAction = false, 100);
 }
 
-// теперь игнорируем входящие sync, если локально перематываем
+// Игнорируем ровно **один** sync после локального seek
 socket.on('sync_state', d => {
   if (!player) {
     initialSync = d;
-  } else if (!localSeeking) {
+  } else if (localSeeking) {
+    localSeeking = false;
+  } else {
     debouncedSync(d.position, d.is_paused, d.updatedAt);
   }
 });
 socket.on('player_update', d => {
-  if (!localSeeking) {
+  if (localSeeking) {
+    localSeeking = false;
+  } else {
     debouncedSync(d.position, d.is_paused, d.updatedAt);
   }
 });
 
 //
-// Инициализация плеера (без изменений, только доп. события seeking/seeked)
+// Инициализация плеера и фикса seek-logic
 //
 async function fetchRoom(){
   try {
@@ -223,11 +219,10 @@ async function fetchRoom(){
       }
     });
 
-    // === новый обработчик для начала локальной перемотки ===
+    // При старте локальной seek-операции помечаем, что следующий sync — наш own-echo
     v.addEventListener('seeking', () => {
       if (!isRemoteAction) {
         localSeeking = true;
-        // сбрасываем любой запланированный remote sync
         if (syncTimeout) {
           clearTimeout(syncTimeout);
           syncTimeout = null;
@@ -235,19 +230,15 @@ async function fetchRoom(){
       }
     });
 
-    // === изменённый обработчик seeked: emit + сброс localSeeking через 300ms ===
+    // После завершения seek — шлём своё действие
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
         emitPlayerActionThrottled(v.paused);
-        if (seekingTimeout) clearTimeout(seekingTimeout);
-        seekingTimeout = setTimeout(() => {
-          localSeeking = false;
-        }, 300);
       }
     });
 
-    v.addEventListener('play',   () => { if (!isRemoteAction) emitPlayerActionThrottled(false); });
-    v.addEventListener('pause',  () => { if (!isRemoteAction) emitPlayerActionThrottled(true); });
+    v.addEventListener('play',  () => { if (!isRemoteAction) emitPlayerActionThrottled(false); });
+    v.addEventListener('pause', () => { if (!isRemoteAction) emitPlayerActionThrottled(true); });
 
     player = v;
 
