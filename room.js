@@ -31,8 +31,9 @@ let myUserId       = null;
 let initialSync    = null;
 
 // пороги синхронизации
-const HARD_SYNC_THRESHOLD = 0.3;  // сек — мгновенный перепрыг
-const SOFT_SYNC_THRESHOLD = 0.05; // сек — подтяжка через playbackRate
+const HARD_SYNC_THRESHOLD   = 0.3;  // сек — мгновенный перепрыг
+const SOFT_SYNC_THRESHOLD   = 0.05; // сек — подтяжка через playbackRate
+const AUTO_RESYNC_THRESHOLD = 1.0;  // сек — если больше, запросим свежий стейт
 
 // ==========================
 // 1) меряем RTT для drift-коррекции
@@ -51,7 +52,7 @@ setInterval(measurePing, 10_000);
 // ==========================
 socket.on('connect', () => {
   myUserId = socket.id;
-  socket.emit('join',        { roomId, userData: { id: myUserId, first_name: 'Гость' } });
+  socket.emit('join',          { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
@@ -61,7 +62,7 @@ socket.on('connect', () => {
 // ==========================
 socket.on('members', ms => {
   membersList.innerHTML =
-    `<div class="chat-members-label">Участники (${ms.length}):</div>`+
+    `<div class="chat-members-label">Участники (${ms.length}):</div>` +
     `<ul>${ms.map(m=>`<li>${m.user_id}</li>`).join('')}</ul>`;
 });
 socket.on('history', data => {
@@ -70,10 +71,8 @@ socket.on('history', data => {
 });
 socket.on('chat_message',   m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
-
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => e.key==='Enter' && sendMessage());
-
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
@@ -82,7 +81,7 @@ function sendMessage() {
 }
 
 // ==========================
-// 4) сразу применяем все входящие обновления
+// 4) входящие обновления сразу применяем
 // ==========================
 socket.on('sync_state',   d => { initialSync = d; });
 socket.on('player_update', d => {
@@ -96,13 +95,18 @@ function doSync(pos, isPaused, serverTs) {
   if (serverTs <= lastUpdate) return;
   lastUpdate = serverTs;
   if (!player) return;
-  isRemoteAction = true;
 
+  isRemoteAction = true;
   const now     = Date.now();
   const driftMs = (now - serverTs) - lastPing/2;
   const target  = isPaused ? pos : pos + driftMs/1000;
   const delta   = target - player.currentTime;
   const absD    = Math.abs(delta);
+
+  // если очень большой рассинхрон — запросим у сервера свежий стейт
+  if (absD > AUTO_RESYNC_THRESHOLD) {
+    socket.emit('request_state', { roomId });
+  }
 
   // 1) большой рассинхрон — мгновенный перепрыг
   if (absD > HARD_SYNC_THRESHOLD) {
@@ -151,7 +155,7 @@ async function fetchRoom(){
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
-    // секция с ID комнаты (как было)
+    // секция с ID комнаты
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -188,21 +192,21 @@ async function fetchRoom(){
     });
 
     // ========== события пользователя ==========
-    // игнорируем скриптовые seeks/plays/pauses
+    // фильтруем только реальные клики/драги
     v.addEventListener('seeking', e => {
       if (!e.isTrusted || isRemoteAction) return;
     });
     v.addEventListener('seeked', e => {
       if (!e.isTrusted || isRemoteAction) return;
-      sendPlayerAction();
+      emitReliableAction();
     });
     v.addEventListener('play', e => {
       if (!e.isTrusted || isRemoteAction) return;
-      sendPlayerAction();
+      emitReliableAction();
     });
     v.addEventListener('pause', e => {
       if (!e.isTrusted || isRemoteAction) return;
-      sendPlayerAction();
+      emitReliableAction();
     });
 
     player = v;
@@ -213,14 +217,17 @@ async function fetchRoom(){
   }
 }
 
-// вспомогательные функции
-function sendPlayerAction() {
-  socket.emit('player_action', {
+// отправляем сразу и с автоповторами, чтобы не терять команды при частых seeks
+function emitReliableAction() {
+  const data = {
     roomId,
     position:  player.currentTime,
     is_paused: player.paused,
     speed:     player.playbackRate
-  });
+  };
+  for (let delay of [0, 100, 200]) {
+    setTimeout(() => socket.emit('player_action', data), delay);
+  }
 }
 
 function createSpinner(){
@@ -230,6 +237,7 @@ function createSpinner(){
   s.style.display = 'none';
   return s;
 }
+
 function appendMessage(author, text){
   const d = document.createElement('div');
   d.className = 'chat-message';
