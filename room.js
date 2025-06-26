@@ -24,17 +24,16 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player;
-let isRemoteAction   = false;
-let lastUpdate       = 0;
-let myUserId         = null;
-let initialSync      = null;
-let syncTimeout      = null;
+let isRemoteAction = false;
+let lastUpdate     = 0;
+let myUserId       = null;
+let initialSync    = null;
+let syncTimeout    = null;
 
-let lastPing         = 0;
-let sendLock         = false;
-let lastLocalAction  = 0;
+let lastPing   = 0;
+let sendLock   = false;
 
-// измеряем RTT
+// 1) Меряем RTT
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -42,12 +41,11 @@ function measurePing() {
     lastPing = Date.now() - t0;
   });
 }
-setInterval(measurePing, 10000);
+setInterval(measurePing, 10_000);
 
-// throttle и пометка локального действия
-function emitAction(isPaused) {
-  if (sendLock || !player) return;
-  lastLocalAction = Date.now();
+// 2) Троттлим отправку действий
+function emitPlayerActionThrottled(isPaused) {
+  if (sendLock) return;
   socket.emit('player_action', {
     roomId,
     position:  player.currentTime,
@@ -55,10 +53,10 @@ function emitAction(isPaused) {
     speed:     player.playbackRate
   });
   sendLock = true;
-  setTimeout(() => sendLock = false, 150);
+  setTimeout(() => sendLock = false, 150); // 150 мс очень мало заметно
 }
 
-// socket events
+// 3) Подключаемся и синхронизируем
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -66,6 +64,7 @@ socket.on('connect', () => {
   fetchRoom();
 });
 
+// Chat & members
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>
@@ -73,67 +72,76 @@ socket.on('members', ms => {
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
-  data.forEach(m => appendMessage(m.author, m.text));
+  data.forEach(m=>appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
-socket.on('pong', () => {});
-socket.on('error', () => {
-  // при ошибке попробуем пересинхронизироваться
-  setTimeout(() => socket.emit('request_state', { roomId }), 1000);
+
+// ping/pong
+socket.on('pong', () => {
+  // сюда приходит, но мы используем socket.once в measurePing
 });
 
-// синхронизация
+// send chat
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => e.key==='Enter' && sendMessage());
+function sendMessage() {
+  const t = msgInput.value.trim();
+  if (!t) return;
+  socket.emit('chat_message', { roomId, author:'Гость', text:t });
+  msgInput.value = '';
+}
+
+// 4) Sync с учётом пинга и прогнозом
 function debouncedSync(pos, isPaused, serverTs) {
-  clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => {
+  if (syncTimeout) clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(()=>{
     doSync(pos, isPaused, serverTs);
-  }, 50);
+  }, 50); // 50 мс дебаунс
 }
 
 function doSync(pos, isPaused, serverTs) {
-  // игнорируем эхо сразу после локального seek/play/pause
-  if (serverTs <= lastLocalAction + 500) return;
-  // игнорируем старые
   if (serverTs < lastUpdate) return;
   lastUpdate = serverTs;
   if (!player) return;
   isRemoteAction = true;
 
-  // прогноз позиции
-  const now    = Date.now();
-  const drift  = (now - serverTs) - lastPing/2;
-  const target = isPaused
+  const now      = Date.now();
+  // корректируем на половину RTT
+  const driftMs  = (now - serverTs) - lastPing/2;
+  // если видео играет — прогнозируем новую позицию
+  const target   = isPaused
     ? pos
-    : pos + drift/1000;
+    : pos + driftMs/1000;
 
-  const delta = target - player.currentTime;
-  const abs   = Math.abs(delta);
+  const delta    = target - player.currentTime;
+  const absDelta = Math.abs(delta);
 
-  if (abs > 1) {
+  // 1) резкий seek > 1s
+  if (absDelta > 1) {
     player.currentTime = target;
-  } else if (abs > 0.05) {
+  }
+  // 2) маленький дрейф 0.05–1s — покрутим скорость
+  else if (absDelta > 0.05) {
     player.playbackRate = delta > 0 ? 1.05 : 0.95;
-    setTimeout(() => { if (player) player.playbackRate = 1; }, 500);
+    setTimeout(() => {
+      if (player) player.playbackRate = 1;
+    }, 500);
   }
 
-  // если сервер говорит pause, но это эхо после локального seek/play — пропускаем
-  if (isPaused) {
-    // только если прошло >500 мс после нашего действия
-    if (Date.now() > lastLocalAction + 500 && !player.paused) {
-      player.pause();
-    }
-  } else {
-    if (player.paused) {
-      player.play().catch(() => {
-        if (!window.__autoplayWarned) {
-          window.__autoplayWarned = true;
-          alert('Нажмите по видео для автозапуска');
-        }
-      });
-    }
+  // 3) пауза/плей
+  if (isPaused && !player.paused) {
+    player.pause();
+  } else if (!isPaused && player.paused) {
+    player.play().catch(()=>{
+      if (!window.__autoplayWarned) {
+        window.__autoplayWarned = true;
+        alert('Нажмите по видео для автозапуска');
+      }
+    });
   }
 
+  // сброс флага
   setTimeout(() => isRemoteAction = false, 100);
 }
 
@@ -145,18 +153,8 @@ socket.on('player_update', d => {
   debouncedSync(d.position, d.is_paused, d.updatedAt);
 });
 
-// чат
-sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => e.key==='Enter' && sendMessage());
-function sendMessage() {
-  const t = msgInput.value.trim();
-  if (!t) return;
-  socket.emit('chat_message', { roomId, author:'Гость', text:t });
-  msgInput.value = '';
-}
-
-// инициализация плеера
-async function fetchRoom() {
+// Инициализация плеера (без изменений, только привязываем throttled emit)
+async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(res.status);
@@ -176,6 +174,7 @@ async function fetchRoom() {
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
+    // бейдж и копировака
     const badge = document.createElement('div');
     badge.className='room-id-badge';
     badge.innerHTML=`
@@ -209,47 +208,38 @@ async function fetchRoom() {
       }
     });
 
-    // Запоминаем состояние до перемотки и корректно шлем его после seek
-    let wasPlayingBeforeSeek = false;
-    v.addEventListener('seeking', () => {
-      if (!isRemoteAction) {
-        wasPlayingBeforeSeek = !v.paused;
-      }
-    });
-    v.addEventListener('seeked', () => {
-      if (!isRemoteAction) {
-        emitAction(!wasPlayingBeforeSeek);
-      }
-    });
-    v.addEventListener('play',  () => { if (!isRemoteAction) emitAction(false); });
-    v.addEventListener('pause', () => { if (!isRemoteAction) emitAction(true); });
+    // сюда привязываем throttled emit
+    v.addEventListener('play',   () => { if (!isRemoteAction) emitPlayerActionThrottled(false); });
+    v.addEventListener('pause',  () => { if (!isRemoteAction) emitPlayerActionThrottled(true); });
+    v.addEventListener('seeked', () => { if (!isRemoteAction) emitPlayerActionThrottled(v.paused); });
 
     player = v;
-  } catch (err) {
-    console.error('FetchRoom error', err);
-    playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
+
+  } catch(err){
+    console.error(err);
+    playerWrapper.innerHTML=`<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
 function createSpinner(){
-  const s = document.createElement('div');
-  s.className = 'buffer-spinner';
-  s.innerHTML = `<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
-  s.style.display = 'none';
+  const s=document.createElement('div');
+  s.className='buffer-spinner';
+  s.innerHTML=`<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
+  s.style.display='none';
   return s;
 }
 
 function appendMessage(a,t){
-  const d = document.createElement('div');
-  d.className = 'chat-message';
-  d.innerHTML = `<strong>${a}:</strong> ${t}`;
+  const d=document.createElement('div');
+  d.className='chat-message';
+  d.innerHTML=`<strong>${a}:</strong> ${t}`;
   messagesBox.appendChild(d);
-  messagesBox.scrollTop = messagesBox.scrollHeight;
+  messagesBox.scrollTop=messagesBox.scrollHeight;
 }
 function appendSystemMessage(t){
-  const d = document.createElement('div');
-  d.className = 'chat-message system-message';
-  d.innerHTML = `<em>${t}</em>`;
+  const d=document.createElement('div');
+  d.className='chat-message system-message';
+  d.innerHTML=`<em>${t}</em>`;
   messagesBox.appendChild(d);
-  messagesBox.scrollTop = messagesBox.scrollHeight;
+  messagesBox.scrollTop=messagesBox.scrollHeight;
 }
