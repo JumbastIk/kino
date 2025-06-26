@@ -34,12 +34,12 @@ let syncTimeout    = null;
 let metadataReady  = false;
 let sendLock       = false;
 
-// Пороги синхронизации
-const HARD_SYNC_THRESHOLD   = 0.3;   // мгновенный прыжок, сек
-const SOFT_SYNC_THRESHOLD   = 0.05;  // плавная подтяжка
-const AUTO_RESYNC_THRESHOLD = 1.0;   // запрос fresh-state, сек
+// thresholds
+const HARD_SYNC_THRESHOLD   = 0.3;
+const SOFT_SYNC_THRESHOLD   = 0.05;
+const AUTO_RESYNC_THRESHOLD = 1.0;
 
-// 1) Измеряем RTT каждые 10 с
+// 1) measure RTT
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -49,7 +49,7 @@ function measurePing() {
 }
 setInterval(measurePing, 10000);
 
-// 2) При подключении запрашиваем состояние и инициализируем плеер
+// 2) on connect
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join',          { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -60,7 +60,7 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 
-// 3) Чат и список участников
+// 3) chat & members
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
@@ -81,7 +81,7 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// 4) Приём серверных sync события
+// 4) incoming sync
 socket.on('sync_state',    d => scheduleSync(d));
 socket.on('player_update', d => scheduleSync(d));
 function scheduleSync(d) {
@@ -93,9 +93,21 @@ function scheduleSync(d) {
   }
 }
 
-// 5) Алгоритм коррекции
+// 5) doSync with logs
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
-  if (serverTs <= lastUpdate) return;
+  console.log('[doSync START]', {
+    now: Date.now(),
+    serverTs,
+    pos,
+    isPaused,
+    lastUpdate,
+    currentTime: player?.currentTime
+  });
+
+  if (serverTs <= lastUpdate) {
+    console.log('[doSync] skipped due to timestamp', { serverTs, lastUpdate });
+    return;
+  }
   lastUpdate = serverTs;
   if (!player) return;
 
@@ -106,39 +118,38 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   const delta = target - player.currentTime;
   const absD  = Math.abs(delta);
 
-  // 5.1) Если больше AUTO_RESYNC_THRESHOLD — запрос fresh-state
   if (absD > AUTO_RESYNC_THRESHOLD) {
     socket.emit('request_state', { roomId });
   }
-
-  // 5.2) Жёсткий перескок
   if (absD > HARD_SYNC_THRESHOLD) {
     player.currentTime = target;
   }
-  // 5.3) Плавная подтяжка скоростью
   else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
     player.playbackRate = 1 + delta * 0.5;
   }
-  // 5.4) Восстановление обычной скорости
   else if (player.playbackRate !== 1) {
     player.playbackRate = 1;
   }
 
-  // 5.5) Синхронизация play/pause
   if (isPaused) {
     if (!player.paused) player.pause();
   } else {
     if (player.paused) player.play().catch(()=>{});
   }
 
-  // 5.6) Снятие флага remote-action
+  console.log('[doSync END]', {
+    currentTime: player.currentTime,
+    paused: player.paused,
+    playbackRate: player.playbackRate
+  });
+
   setTimeout(() => {
     isRemoteAction = false;
     if (player.playbackRate !== 1) player.playbackRate = 1;
   }, 20);
 }
 
-// 6) Загрузка комнаты и инициализация плеера
+// 6) fetchRoom & init player
 async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -147,10 +158,7 @@ async function fetchRoom(){
     const movie = movies.find(m=>m.id===movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
 
-    // back-link
     backLink.href = `${movie.html}?id=${movie.id}`;
-
-    // обёртка плеера
     playerWrapper.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.style.position = 'relative';
@@ -162,7 +170,6 @@ async function fetchRoom(){
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
-    // бейдж с roomId
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -175,7 +182,6 @@ async function fetchRoom(){
       alert('Скопировано');
     };
 
-    // инициализация HLS
     const v = document.getElementById('videoPlayer');
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
@@ -189,7 +195,6 @@ async function fetchRoom(){
       throw new Error('HLS не поддерживается');
     }
 
-    // ждём метаданных для initialSync
     v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       if (initialSync) {
@@ -198,7 +203,6 @@ async function fetchRoom(){
       }
     });
 
-    // функция отправки действий с throttle
     function emitAction(paused) {
       if (sendLock) return;
       socket.emit('player_action', {
@@ -211,17 +215,13 @@ async function fetchRoom(){
       setTimeout(()=> sendLock = false, 150);
     }
 
-    // пользовательские события
-    v.addEventListener('seeking', () => {
-      // ждём seeked
-    });
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) emitAction(v.paused);
     });
-    v.addEventListener('play', () => {
+    v.addEventListener('play',   () => {
       if (!isRemoteAction) emitAction(false);
     });
-    v.addEventListener('pause', () => {
+    v.addEventListener('pause',  () => {
       if (!isRemoteAction) emitAction(true);
     });
 
@@ -233,7 +233,7 @@ async function fetchRoom(){
   }
 }
 
-// Вспомогательные функции
+// helpers
 function createSpinner(){
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
