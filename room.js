@@ -135,17 +135,13 @@ function doSync(pos, isPaused, serverTs) {
     player.pause();
   } else if (!isPaused && player.paused) {
     player.play().catch(()=>{
-      if (!window.__autoplayWarned) {
-        window.__autoplayWarned = true;
-        alert('Нажмите по видео для автозапуска');
-      }
+      // убрали alert — теперь без ошибок
     });
   }
 
   setTimeout(() => isRemoteAction = false, 100);
 }
 
-// Игнорируем ровно **один** sync после локального seek
 socket.on('sync_state', d => {
   if (!player) {
     initialSync = d;
@@ -180,7 +176,7 @@ async function fetchRoom(){
     const wrap = document.createElement('div');
     wrap.style.position='relative';
     wrap.innerHTML=`
-      <video id="videoPlayer" controls crossorigin="anonymous" playsinline
+      <video id="videoPlayer" controls autoplay muted crossorigin="anonymous" playsinline
              style="width:100%;border-radius:14px"></video>`;
     const spinner = createSpinner();
     wrap.appendChild(spinner);
@@ -198,6 +194,7 @@ async function fetchRoom(){
     };
 
     const v = document.getElementById('videoPlayer');
+    v.muted = true; // на всякий случай
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
