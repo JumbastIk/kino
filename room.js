@@ -24,6 +24,7 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player;
+let spinner;           // буфер-спиннер
 let isRemoteAction = false;
 let lastUpdate     = 0;
 let lastPing       = 0;
@@ -90,7 +91,7 @@ socket.on('player_update', d => {
   doSync(d.position, d.is_paused, d.updatedAt);
 });
 
-// 5) main sync logic
+// 5) main sync logic (overlay removed)
 function doSync(pos, isPaused, serverTs) {
   if (serverTs <= lastUpdate) return;
   lastUpdate = serverTs;
@@ -117,13 +118,10 @@ function doSync(pos, isPaused, serverTs) {
     player.playbackRate = 1;
   }
 
-  if (isPaused && !player.paused)      player.pause();
+  if (isPaused && !player.paused) player.pause();
   else if (!isPaused && player.paused) player.play().catch(()=>{});
 
-  // out-of-sync indicator
-  const overlay = document.getElementById('outOfSync');
-  if (absD > AUTO_RESYNC_THRESHOLD) overlay.style.display = 'block';
-  else overlay.style.display = 'none';
+  // overlay removed: ничего не делаем с out-of-sync
 
   setTimeout(() => {
     isRemoteAction = false;
@@ -151,12 +149,12 @@ async function fetchRoom(){
         <button id="btnPlay" class="control-btn">Play</button>
         <input id="seekBar" type="range" class="seek-bar" min="0" max="100" value="0">
         <span id="timeDisplay" class="time-display">00:00 / 00:00</span>
-        <button id="btnResync" class="control-btn" style="display:none;">Resync</button>
-      </div>
-      <div id="outOfSync" class="out-of-sync" style="display:none;">
-        Видео рассинхронизировалось! <button id="btnManualResync">Синхронизировать</button>
       </div>
     `;
+    // create & cache spinner
+    spinner = createSpinner();
+    wrap.appendChild(spinner);
+
     playerWrapper.appendChild(wrap);
 
     // room ID badge
@@ -174,16 +172,15 @@ async function fetchRoom(){
     const v = document.getElementById('videoPlayer');
     const playBtn = document.getElementById('btnPlay');
     const seekBar = document.getElementById('seekBar');
-    const timeDisp = document.getElementById('timeDisplay');
-    const manualBtn = document.getElementById('btnManualResync');
+    const timeDisp= document.getElementById('timeDisplay');
 
     // HLS setup
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
-      v.addEventListener('waiting',  () => wrap.querySelector('.buffer-spinner').style.display = 'block');
-      v.addEventListener('playing', () => wrap.querySelector('.buffer-spinner').style.display = 'none');
+      v.addEventListener('waiting',  () => spinner.style.display = 'block');
+      v.addEventListener('playing', () => spinner.style.display = 'none');
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = movie.videoUrl;
     } else {
@@ -218,37 +215,19 @@ async function fetchRoom(){
     }
 
     // custom controls events
-    playBtn.onclick = () => {
-      if (v.paused) v.play(); else v.pause();
-    };
+    playBtn.onclick = () => v.paused ? v.play() : v.pause();
     seekBar.oninput = () => {
       v.currentTime = seekBar.value;
       updateTimeDisplay();
     };
-    seekBar.onchange = () => {
-      emitReliableAction();
-    };
-    manualBtn.onclick = () => {
-      socket.emit('request_state', { roomId });
-    };
+    seekBar.onchange = () => emitReliableAction();
 
     // filter user events
-    v.addEventListener('seeking', e => {
-      if (!e.isTrusted || isRemoteAction) return;
-    });
-    v.addEventListener('seeked', e => {
-      if (!e.isTrusted || isRemoteAction) return;
-      emitReliableAction();
-    });
-    v.addEventListener('play', e => {
-      if (!e.isTrusted || isRemoteAction) return;
-      emitReliableAction();
-      playBtn.textContent = 'Pause';
-    });
-    v.addEventListener('pause', e => {
-      if (!e.isTrusted || isRemoteAction) return;
-      emitReliableAction();
-      playBtn.textContent = 'Play';
+    ['seeking','seeked','play','pause'].forEach(evt => {
+      v.addEventListener(evt, e => {
+        if (!e.isTrusted || isRemoteAction) return;
+        if (evt !== 'seeking') emitReliableAction();
+      });
     });
 
     player = v;
