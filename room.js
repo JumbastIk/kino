@@ -35,9 +35,9 @@ let metadataReady  = false;
 let sendLock       = false;
 
 // thresholds
-const HARD_SYNC_THRESHOLD   = 0.3;
-const SOFT_SYNC_THRESHOLD   = 0.05;
-const AUTO_RESYNC_THRESHOLD = 1.0;
+const HARD_SYNC_THRESHOLD   = 0.3;  // sec
+const SOFT_SYNC_THRESHOLD   = 0.05; // sec
+const AUTO_RESYNC_THRESHOLD = 1.0;  // sec
 
 // 1) measure RTT
 function measurePing() {
@@ -45,6 +45,7 @@ function measurePing() {
   socket.emit('ping');
   socket.once('pong', () => {
     lastPing = Date.now() - t0;
+    console.log('[PING]', lastPing, 'ms');
   });
 }
 setInterval(measurePing, 10000);
@@ -52,11 +53,13 @@ setInterval(measurePing, 10000);
 // 2) on connect
 socket.on('connect', () => {
   myUserId = socket.id;
+  console.log('[SOCKET] connect as', myUserId);
   socket.emit('join',          { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 socket.on('reconnect', () => {
+  console.log('[SOCKET] reconnect');
   socket.emit('request_state', { roomId });
 });
 
@@ -118,23 +121,36 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   const delta = target - player.currentTime;
   const absD  = Math.abs(delta);
 
+  console.log('[doSync] drift, target, delta, absD', { drift, target, delta, absD });
+
   if (absD > AUTO_RESYNC_THRESHOLD) {
+    console.log('[doSync] AUTO_RESYNC_THRESHOLD exceeded → request_state');
     socket.emit('request_state', { roomId });
   }
   if (absD > HARD_SYNC_THRESHOLD) {
+    console.log('[doSync] HARD_SYNC_THRESHOLD → jump to', target);
     player.currentTime = target;
   }
   else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
-    player.playbackRate = 1 + delta * 0.5;
+    const rate = 1 + delta * 0.5;
+    console.log('[doSync] SOFT_SYNC_THRESHOLD → adjust rate to', rate);
+    player.playbackRate = rate;
   }
   else if (player.playbackRate !== 1) {
+    console.log('[doSync] reset playbackRate to 1');
     player.playbackRate = 1;
   }
 
   if (isPaused) {
-    if (!player.paused) player.pause();
+    if (!player.paused) {
+      console.log('[doSync] pausing');
+      player.pause();
+    }
   } else {
-    if (player.paused) player.play().catch(()=>{});
+    if (player.paused) {
+      console.log('[doSync] starting play');
+      player.play().catch(()=>{});
+    }
   }
 
   console.log('[doSync END]', {
@@ -195,8 +211,27 @@ async function fetchRoom(){
       throw new Error('HLS не поддерживается');
     }
 
+    // remember paused-state before seek
+    let preSeekWasPaused = true;
+    v.addEventListener('seeking', () => {
+      preSeekWasPaused = v.paused;
+      console.log('[SEEK] started, wasPaused=', preSeekWasPaused);
+    });
+    v.addEventListener('seeked', () => {
+      console.log('[SEEK] finished, newTime=', v.currentTime);
+      if (!isRemoteAction) {
+        emitAction(v.paused);
+        // если до seek было PLAY — сразу запускаем
+        if (!preSeekWasPaused) {
+          console.log('[SEEK] restoring play');
+          v.play().catch(()=>{});
+        }
+      }
+    });
+
     v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
+      console.log('[VIDEO] loadedmetadata, duration=', v.duration);
       if (initialSync) {
         doSync(initialSync);
         initialSync = null;
@@ -204,6 +239,10 @@ async function fetchRoom(){
     });
 
     function emitAction(paused) {
+      console.log('[EMIT] player_action', {
+        position: v.currentTime,
+        paused
+      });
       if (sendLock) return;
       socket.emit('player_action', {
         roomId,
@@ -215,13 +254,10 @@ async function fetchRoom(){
       setTimeout(()=> sendLock = false, 150);
     }
 
-    v.addEventListener('seeked', () => {
-      if (!isRemoteAction) emitAction(v.paused);
-    });
-    v.addEventListener('play',   () => {
+    v.addEventListener('play',  () => {
       if (!isRemoteAction) emitAction(false);
     });
-    v.addEventListener('pause',  () => {
+    v.addEventListener('pause', () => {
       if (!isRemoteAction) emitAction(true);
     });
 
