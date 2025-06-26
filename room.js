@@ -31,16 +31,15 @@ let lastPing           = 0;
 let myUserId           = null;
 let initialSync        = null;
 let syncTimeout        = null;
-let localSeeking       = false;
-let wasPlayingBeforeSeek = false;
 let metadataReady      = false;
+let sendLock           = false;
 
-// пороги синхронизации
-const HARD_SYNC_THRESHOLD   = 0.5;   // сек — мгновенный "скачок"
-const SOFT_SYNC_THRESHOLD   = 0.1;   // сек — плавная подтяжка через playbackRate
-const AUTO_RESYNC_THRESHOLD = 0.8;   // сек — если разброд слишком большой
+// thresholds
+const HARD_SYNC_THRESHOLD   = 0.3;   // мгновенный jump
+const SOFT_SYNC_THRESHOLD   = 0.05;  // плавная подтяжка
+const AUTO_RESYNC_THRESHOLD = 1.0;   // запрос fresh-state
 
-// 1) меряем RTT раз в 10с
+// 1) измеряем RTT
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -50,7 +49,7 @@ function measurePing() {
 }
 setInterval(measurePing, 10_000);
 
-// 2) подключаемся, запрашиваем стейт и комнату
+// 2) при connect/join
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join',          { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -73,11 +72,8 @@ socket.on('history', data => {
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
-
 sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => {
-  if (e.key==='Enter') sendMessage();
-});
+msgInput.addEventListener('keydown', e => { if (e.key==='Enter') sendMessage() });
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
@@ -85,24 +81,20 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// 3) входящие обновления от сервера
+// 3) приход от сервера
 socket.on('sync_state',   d => handleIncoming(d));
 socket.on('player_update',d => handleIncoming(d));
 
 function handleIncoming(d) {
   initialSync = d;
   if (metadataReady) {
-    debouncedSync(d.position, d.is_paused, d.updatedAt);
+    clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(() => doSync(d.position, d.is_paused, d.updatedAt), 50);
     initialSync = null;
   }
 }
 
-function debouncedSync(pos, isPaused, serverTs) {
-  if (syncTimeout) clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(pos, isPaused, serverTs), 50);
-}
-
-// 4) основная синхронизация
+// 4) main sync
 function doSync(pos, isPaused, serverTs) {
   if (serverTs <= lastUpdate) return;
   lastUpdate = serverTs;
@@ -115,39 +107,33 @@ function doSync(pos, isPaused, serverTs) {
   const delta = target - player.currentTime;
   const absD  = Math.abs(delta);
 
-  // если далеко ушли — запросим fresh-state
+  // слишком далеко — запрос fresh
   if (absD > AUTO_RESYNC_THRESHOLD) {
     socket.emit('request_state', { roomId });
   }
 
-  // прыжок
   if (absD > HARD_SYNC_THRESHOLD) {
     player.currentTime = target;
-  }
-  // плавная подстройка
-  else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
-    player.playbackRate = Math.min(1.5, Math.max(0.5, 1 + delta * 0.5));
-  }
-  else if (player.playbackRate !== 1) {
+  } else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
+    player.playbackRate = 1 + delta * 0.5;
+  } else if (player.playbackRate !== 1) {
     player.playbackRate = 1;
   }
 
-  // пауза/плей
   if (isPaused && !player.paused) {
     player.pause();
   } else if (!isPaused && player.paused) {
     player.play().catch(()=>{});
   }
 
-  // сбрасываем remote-режим
   setTimeout(() => {
     isRemoteAction = false;
     if (player.playbackRate !== 1) player.playbackRate = 1;
-  }, 100);
+  }, 50);
 }
 
-// 5) грузим комнату и инициализируем плеер
-async function fetchRoom() {
+// 5) fetchRoom + init player
+async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(res.status);
@@ -161,13 +147,13 @@ async function fetchRoom() {
     wrap.style.position = 'relative';
     wrap.innerHTML = `
       <video id="videoPlayer" controls muted playsinline crossorigin="anonymous"
-             style="width:100%;border-radius:14px"></video>
+             style="width:100%;border-radius:14px;"></video>
     `;
     spinner = createSpinner();
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
-    // бейдж комнаты
+    // badge roomId
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -182,7 +168,6 @@ async function fetchRoom() {
 
     const v = document.getElementById('videoPlayer');
     v.muted = true;
-
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
@@ -193,7 +178,7 @@ async function fetchRoom() {
       v.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
 
-    v.addEventListener('loadedmetadata', ()=>{
+    v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       if (initialSync) {
         doSync(initialSync.position, initialSync.is_paused, initialSync.updatedAt);
@@ -201,30 +186,35 @@ async function fetchRoom() {
       }
     });
 
-    v.addEventListener('seeking', ()=>{
+    // throttle эмита
+    function emitAction(paused) {
+      if (sendLock) return;
+      socket.emit('player_action', {
+        roomId,
+        position: v.currentTime,
+        is_paused: paused,
+        speed: v.playbackRate
+      });
+      sendLock = true;
+      setTimeout(()=> sendLock = false, 150);
+    }
+
+    // события пользователя
+    v.addEventListener('seeking', () => {
       if (!isRemoteAction) {
-        localSeeking = true;
-        wasPlayingBeforeSeek = !v.paused;
+        // ничего не шлём пока ищем...
       }
     });
-
-    v.addEventListener('seeked', ()=>{
+    v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        // после seek бросаем синхронизацию
-        emitReliableAction();
-        if (wasPlayingBeforeSeek) {
-          v.play().catch(()=>{});
-        } else {
-          v.pause();
-        }
+        emitAction(v.paused);
       }
     });
-
-    v.addEventListener('play', ()=>{
-      if (!isRemoteAction) emitReliableAction();
+    v.addEventListener('play', () => {
+      if (!isRemoteAction) emitAction(false);
     });
-    v.addEventListener('pause', ()=>{
-      if (!isRemoteAction) emitReliableAction();
+    v.addEventListener('pause', () => {
+      if (!isRemoteAction) emitAction(true);
     });
 
     player = v;
@@ -232,19 +222,6 @@ async function fetchRoom() {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
-}
-
-// 6) надёжный эмит — тройной рестарт
-function emitReliableAction() {
-  const data = {
-    roomId,
-    position:  player.currentTime,
-    is_paused: player.paused,
-    speed:     player.playbackRate
-  };
-  [0,100,200].forEach(dt =>
-    setTimeout(()=>socket.emit('player_action', data), dt)
-  );
 }
 
 function createSpinner(){
@@ -255,17 +232,17 @@ function createSpinner(){
   return s;
 }
 
-function appendMessage(author, text){
+function appendMessage(a,t){
   const d = document.createElement('div');
   d.className = 'chat-message';
-  d.innerHTML = `<strong>${author}:</strong> ${text}`;
+  d.innerHTML = `<strong>${a}:</strong> ${t}`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-function appendSystemMessage(text){
+function appendSystemMessage(t){
   const d = document.createElement('div');
   d.className = 'chat-message system-message';
-  d.innerHTML = `<em>${text}</em>`;
+  d.innerHTML = `<em>${t}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
