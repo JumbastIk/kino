@@ -204,6 +204,7 @@ async function fetchRoom(){
       throw new Error('HLS не поддерживается');
     }
 
+    // initial sync после загрузки метаданных
     v.addEventListener('loadedmetadata', () => {
       if (initialSync) {
         doSync(initialSync.position, initialSync.is_paused, initialSync.updatedAt);
@@ -211,7 +212,7 @@ async function fetchRoom(){
       }
     });
 
-    // фильтрация только пользовательских событий
+    // фильтруем только реальные пользовательские seeks
     v.addEventListener('seeking', e => {
       if (!e.isTrusted || isRemoteAction) return;
       localSeeking = true;
@@ -220,6 +221,7 @@ async function fetchRoom(){
     });
     v.addEventListener('seeked', e => {
       if (!e.isTrusted || isRemoteAction) return;
+      localSeeking = false;
       if (wasPlayingBeforeSeek) {
         v.play().catch(() => {});
         emitPlayerActionThrottled(false);
@@ -228,13 +230,15 @@ async function fetchRoom(){
         emitPlayerActionThrottled(true);
       }
     });
+
+    // игнорируем native pause во время seek
+    v.addEventListener('pause', e => {
+      if (!e.isTrusted || isRemoteAction || localSeeking) return;
+      emitPlayerActionThrottled(true);
+    });
     v.addEventListener('play', e => {
       if (!e.isTrusted || isRemoteAction) return;
       emitPlayerActionThrottled(false);
-    });
-    v.addEventListener('pause', e => {
-      if (!e.isTrusted || isRemoteAction) return;
-      emitPlayerActionThrottled(true);
     });
 
     player = v;
