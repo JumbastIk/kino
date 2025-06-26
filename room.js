@@ -24,16 +24,19 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player;
-let isRemoteAction       = false;
-let lastUpdate           = 0;
-let initialSync          = null;
-let syncTimeout          = null;
-let lastPing             = 0;
-let sendLock             = false;
-let localSeeking         = false;
+let isRemoteAction     = false;
+let lastUpdate         = 0;
+let myUserId           = null;
+let initialSync        = null;
+let syncTimeout        = null;
+let lastPing           = 0;
+let sendLock           = false;
+let localSeeking       = false;
 let wasPlayingBeforeSeek = false;
 
+//
 // 1) Меряем RTT каждые 10 секунд
+//
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -43,7 +46,9 @@ function measurePing() {
 }
 setInterval(measurePing, 10_000);
 
+//
 // 2) Троттлим отправку действий игрока
+//
 function emitPlayerActionThrottled(isPaused) {
   if (sendLock) return;
   socket.emit('player_action', {
@@ -56,18 +61,23 @@ function emitPlayerActionThrottled(isPaused) {
   setTimeout(() => sendLock = false, 150);
 }
 
-// 3) При подключении запрашиваем состояние
+//
+// 3) При подключении запрашиваем состояние и комнату
+//
 socket.on('connect', () => {
-  socket.emit('join', { roomId });
+  myUserId = socket.id;
+  socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 
+//
 // 4) Чат и список участников
+//
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
-    `<ul>${ms.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
+    `<ul>${ms.map(m=>`<li>${m.user_id}</li>`).join('')}</ul>`;
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
@@ -85,9 +95,11 @@ function sendMessage() {
   msgInput.value = '';
 }
 
+//
 // 5) Синхронизация с учётом пинга
+//
 function debouncedSync(pos, isPaused, serverTs) {
-  clearTimeout(syncTimeout);
+  if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     doSync(pos, isPaused, serverTs);
   }, 50);
@@ -99,27 +111,24 @@ function doSync(pos, isPaused, serverTs) {
   if (!player) return;
   isRemoteAction = true;
 
-  // Рассчитываем, куда нужно прыгнуть
-  const driftMs  = (Date.now() - serverTs) - lastPing/2;
-  const target   = isPaused ? pos : pos + driftMs/1000;
-  const delta    = target - player.currentTime;
-  const absDelta = Math.abs(delta);
+  const now     = Date.now();
+  const drift  = (now - serverTs) - lastPing/2;
+  const target = isPaused ? pos : pos + drift/1000;
+  const delta  = target - player.currentTime;
+  const absD   = Math.abs(delta);
 
-  if (absDelta > 1) {
+  if (absD > 1) {
     player.currentTime = target;
-  } else if (absDelta > 0.05) {
+  } else if (absD > 0.05) {
     player.playbackRate = delta > 0 ? 1.05 : 0.95;
     setTimeout(() => player.playbackRate = 1, 500);
   }
 
-  // Восстанавливаем режим: play или pause
-  if (isPaused) {
-    if (!player.paused) player.pause();
-  } else {
-    if (player.paused) player.play().catch(()=>{});
+  // Убираем remote-pause: не останавливаем видео по состоянию сервера
+  if (!isPaused && player.paused) {
+    player.play().catch(() => {});
   }
 
-  // Снимаем блокировку remote-операций
   setTimeout(() => isRemoteAction = false, 100);
 }
 
@@ -140,13 +149,16 @@ socket.on('player_update', d => {
   }
 });
 
-// 6) Инициализация плеера
+//
+// 6) Загрузка комнаты и инициализация плеера
+//
 async function fetchRoom(){
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
     if (!res.ok) throw new Error(res.status);
-    const { movie_id } = await res.json();
-    const movie = movies.find(m => m.id === movie_id);
+    const roomData = await res.json();
+
+    const movie = movies.find(m => m.id === roomData.movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
 
@@ -184,7 +196,6 @@ async function fetchRoom(){
       throw new Error('HLS не поддерживается');
     }
 
-    // Первоначальный sync
     v.addEventListener('loadedmetadata', () => {
       if (initialSync) {
         doSync(initialSync.position, initialSync.is_paused, initialSync.updatedAt);
@@ -192,19 +203,18 @@ async function fetchRoom(){
       }
     });
 
-    // Обработка seek
     v.addEventListener('seeking', () => {
       if (!isRemoteAction) {
         localSeeking = true;
         wasPlayingBeforeSeek = !v.paused;
-        clearTimeout(syncTimeout);
+        if (syncTimeout) clearTimeout(syncTimeout);
       }
     });
+
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        // Делаем либо play, либо pause, как было ДО seek
         if (wasPlayingBeforeSeek) {
-          v.play().catch(()=>{});
+          v.play().catch(() => {});
           emitPlayerActionThrottled(false);
         } else {
           v.pause();
@@ -213,7 +223,6 @@ async function fetchRoom(){
       }
     });
 
-    // Play/Pause кнопки
     v.addEventListener('play',  () => { if (!isRemoteAction) emitPlayerActionThrottled(false); });
     v.addEventListener('pause', () => { if (!isRemoteAction) emitPlayerActionThrottled(true); });
 
