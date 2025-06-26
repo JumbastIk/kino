@@ -35,6 +35,8 @@ let sendLock       = false;
 
 // Флаг: после локальной seek-операции игнорируем 1-е входящее sync
 let localSeeking = false;
+// Нужен, чтобы запомнить, было ли до промотки видео в режиме PLAY
+let wasPlayingBeforeSeek = false;
 
 //
 // 1) Меряем RTT
@@ -194,17 +196,13 @@ async function fetchRoom(){
     };
 
     const v = document.getElementById('videoPlayer');
-    v.muted = true; // на всякий случай
+    v.muted = true;
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
       v.addEventListener('waiting', ()=>spinner.style.display='block');
       v.addEventListener('playing',()=>spinner.style.display='none');
-      // можно принудительно выбрать высокий уровень:
-      // hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      //   hls.currentLevel = hls.levels.length - 1;
-      // });
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
@@ -224,6 +222,7 @@ async function fetchRoom(){
     v.addEventListener('seeking', () => {
       if (!isRemoteAction) {
         localSeeking = true;
+        wasPlayingBeforeSeek = !v.paused;
         if (syncTimeout) {
           clearTimeout(syncTimeout);
           syncTimeout = null;
@@ -231,11 +230,16 @@ async function fetchRoom(){
       }
     });
 
-    // После завершения seek — шлём своё действие
+    // После завершения seek — ставим в тот же режим, в котором было видео до промотки
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        // всегда PLAY после промотки
-        emitPlayerActionThrottled(false);
+        if (wasPlayingBeforeSeek) {
+          v.play().catch(()=>{});
+          emitPlayerActionThrottled(false);
+        } else {
+          v.pause();
+          emitPlayerActionThrottled(true);
+        }
       }
     });
 
