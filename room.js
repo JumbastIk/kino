@@ -135,7 +135,7 @@ function doSync(pos, isPaused, serverTs) {
     player.pause();
   } else if (!isPaused && player.paused) {
     player.play().catch(()=>{
-      // убрали alert — теперь без ошибок
+      // ошибок нет
     });
   }
 
@@ -201,8 +201,12 @@ async function fetchRoom(){
       hls.attachMedia(v);
       v.addEventListener('waiting', ()=>spinner.style.display='block');
       v.addEventListener('playing',()=>spinner.style.display='none');
+      // можно принудительно выбрать высокий уровень:
+      // hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      //   hls.currentLevel = hls.levels.length - 1;
+      // });
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-      v.src=movie.videoUrl;
+      v.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
 
     v.addEventListener('loadedmetadata', () => {
@@ -230,7 +234,8 @@ async function fetchRoom(){
     // После завершения seek — шлём своё действие
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        emitPlayerActionThrottled(v.paused);
+        // всегда PLAY после промотки
+        emitPlayerActionThrottled(false);
       }
     });
 
@@ -246,24 +251,24 @@ async function fetchRoom(){
 }
 
 function createSpinner(){
-  const s=document.createElement('div');
-  s.className='buffer-spinner';
-  s.innerHTML=`<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
-  s.style.display='none';
+  const s = document.createElement('div');
+  s.className = 'buffer-spinner';
+  s.innerHTML = `<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
+  s.style.display = 'none';
   return s;
 }
 
 function appendMessage(a,t){
-  const d=document.createElement('div');
-  d.className='chat-message';
-  d.innerHTML=`<strong>${a}:</strong> ${t}`;
+  const d = document.createElement('div');
+  d.className = 'chat-message';
+  d.innerHTML = `<strong>${a}:</strong> ${t}`;
   messagesBox.appendChild(d);
-  messagesBox.scrollTop=messagesBox.scrollHeight;
+  messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 function appendSystemMessage(t){
-  const d=document.createElement('div');
-  d.className='chat-message system-message';
-  d.innerHTML=`<em>${t}</em>`;
+  const d = document.createElement('div');
+  d.className = 'chat-message system-message';
+  d.innerHTML = `<em>${t}</em>`;
   messagesBox.appendChild(d);
-  messagesBox.scrollTop=messagesBox.scrollHeight;
+  messagesBox.scrollTop = messagesBox.scrollHeight;
 }
