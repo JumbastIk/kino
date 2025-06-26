@@ -101,8 +101,8 @@ function doSync(pos, isPaused, serverTs) {
   isRemoteAction = true;
 
   // прогноз позиции
-  const now   = Date.now();
-  const drift= (now - serverTs) - lastPing/2;
+  const now    = Date.now();
+  const drift  = (now - serverTs) - lastPing/2;
   const target = isPaused
     ? pos
     : pos + drift/1000;
@@ -209,9 +209,20 @@ async function fetchRoom() {
       }
     });
 
-    v.addEventListener('play',   () => { if (!isRemoteAction) emitAction(false); });
-    v.addEventListener('pause',  () => { if (!isRemoteAction) emitAction(true); });
-    v.addEventListener('seeked', () => { if (!isRemoteAction) emitAction(v.paused); });
+    // Запоминаем состояние до перемотки и корректно шлем его после seek
+    let wasPlayingBeforeSeek = false;
+    v.addEventListener('seeking', () => {
+      if (!isRemoteAction) {
+        wasPlayingBeforeSeek = !v.paused;
+      }
+    });
+    v.addEventListener('seeked', () => {
+      if (!isRemoteAction) {
+        emitAction(!wasPlayingBeforeSeek);
+      }
+    });
+    v.addEventListener('play',  () => { if (!isRemoteAction) emitAction(false); });
+    v.addEventListener('pause', () => { if (!isRemoteAction) emitAction(true); });
 
     player = v;
   } catch (err) {
