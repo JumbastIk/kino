@@ -2,16 +2,14 @@ const supabase = require('./supabase');
 
 const roomsState = {};
 const broadcastTimers = {};
-const BROADCAST_INTERVAL = 20000; // 20 секунд — только для страховки/поддержки sync
+const BROADCAST_INTERVAL = 20000; // 20 секунд — только для редких корректировок, не для user-action!
 
 function calculatePosition(roomId) {
   const s = roomsState[roomId];
   if (!s) return { position: 0, is_paused: true, speed: 1, updatedAt: Date.now() };
-
   const now = Date.now();
   const elapsed = (now - s.updatedAt) / 1000;
   const position = s.playing ? s.time + elapsed * s.speed : s.time;
-
   return {
     position,
     is_paused: !s.playing,
@@ -22,13 +20,11 @@ function calculatePosition(roomId) {
 
 function scheduleBroadcast(io, roomId) {
   if (broadcastTimers[roomId]) return;
-
   broadcastTimers[roomId] = setInterval(() => {
     const syncData = calculatePosition(roomId);
     io.to(roomId).emit('sync_state', syncData);
     console.log(`[Broadcast] sync_state to room ${roomId}`, syncData);
   }, BROADCAST_INTERVAL);
-
   console.log(`[Schedule] Started broadcast timer for room ${roomId}`);
 }
 
@@ -102,11 +98,10 @@ module.exports = function (io) {
 
     socket.on('ping', () => socket.emit('pong'));
 
-    // --- ВСЕ действия игрока мгновенно рассылаются sync_state всем участникам
+    // --- ВСЕ действия игрока мгновенно рассылаются sync_state всем участникам!
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       try {
         if (typeof position !== 'number' || position < 0) return;
-
         const now = Date.now();
         roomsState[roomId] = {
           time: position,
@@ -114,17 +109,14 @@ module.exports = function (io) {
           speed: speed || 1,
           updatedAt: now
         };
-
         const updateData = {
           position,
           is_paused,
           speed: speed || 1,
           updatedAt: now
         };
-
         io.to(roomId).emit('sync_state', updateData);
         console.log(`[Player Action][SYNC] from ${socket.id} in room ${roomId}`, updateData);
-
       } catch (err) {
         console.error('[Player Action Error]', err.message);
       }
@@ -137,7 +129,6 @@ module.exports = function (io) {
           author: msg.author,
           text: msg.text
         }]);
-
         const chatMsg = {
           author: msg.author,
           text: msg.text,
@@ -153,7 +144,6 @@ module.exports = function (io) {
     socket.on('disconnect', async () => {
       try {
         if (!currentRoom || !userId) return;
-
         await supabase.from('room_members')
           .delete()
           .match({ room_id: currentRoom, user_id: userId });
