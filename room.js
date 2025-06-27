@@ -111,6 +111,9 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
     return;
   }
 
+  // Новый лог: детально выводим все что прилетело
+  log(`[doSync][${source}] sync: pos=${pos} paused=${isPaused} updatedAt=${serverTs} localSeek=${localSeek} playerTime=${player.currentTime} playerPaused=${player.paused}`);
+
   if (localSeek) {
     player.currentTime = pos;
     logOnce(`⏸ doSync [${source}] SKIP (localSeek) setTime=${pos.toFixed(2)}`);
@@ -140,6 +143,9 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   }
 
   ignoreNextEvent = true;
+
+  // Детальный лог перед изменением play/pause
+  log(`[doSync][${source}] apply pause/play: isPaused=${isPaused} playerPaused=${player.paused}`);
 
   if (isPaused && !player.paused) {
     player.pause();
@@ -215,17 +221,28 @@ async function fetchRoom() {
         logOnce('[player] seeking');
       }
     });
+
+    // Главный фикс и логика для перемотки
     v.addEventListener('seeked', () => {
       if (!ignoreNextEvent) {
         setTimeout(() => {
-          if (wasPausedBeforeSeek && !v.paused) v.pause();
-          if (!wasPausedBeforeSeek && v.paused) v.play();
+          // После перемотки всегда воспроизводим (как у всех) - т.е. play если не на паузе был до этого
+          if (!wasPausedBeforeSeek) {
+            v.play();
+            logOnce('[player] seeked: auto play after seek');
+          } else if (wasPausedBeforeSeek && !v.paused) {
+            v.pause();
+            logOnce('[player] seeked: back to pause after seek');
+          }
         }, 0);
-        emitAction(v.paused);
-        logOnce('[player] seeked emitAction');
+
+        // ВСЕГДА отправляем действие с is_paused: false после seeked, чтобы все клиенты синхронизировались
+        emitAction(false); // <- главное изменение: после seek всегда is_paused:false!
+        logOnce('[player] seeked emitAction (force play)');
       }
       wasPausedBeforeSeek = false;
     });
+
     v.addEventListener('play', () => {
       if (!ignoreNextEvent && !localSeek) {
         emitAction(false);
@@ -252,6 +269,9 @@ function emitAction(paused) {
   if (!player) return;
   const now = Date.now();
   const position = player.currentTime;
+
+  // Детальный лог о том что отправляем на сервер
+  log(`[emitAction] OUT: is_paused=${paused} @${position.toFixed(3)} time=${now}`);
 
   if (
     now - lastSent.time < 200 &&
