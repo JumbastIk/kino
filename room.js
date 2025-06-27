@@ -29,11 +29,14 @@ let myUserId       = null;
 let initialSync    = null;
 let syncTimeout    = null;
 let metadataReady  = false;
-let sendLock       = false;
 let lastSyncLog    = 0;
 
 let localSeek = false;
 let wasPausedBeforeSeek = false;
+
+// --- [НОВОЕ] ---
+// Фильтрация повторных событий, предотвращает спам между клиентами!
+let lastSent = { time: 0, position: 0, paused: null };
 
 // 🛠 Пинг
 function measurePing() {
@@ -92,7 +95,7 @@ function sendMessage() {
 socket.on('sync_state', d => scheduleSync(d, 'sync_state'));
 socket.on('player_update', d => scheduleSync(d, 'player_update'));
 
-// --- rate limit sync --- 
+// --- rate limit sync ---
 function scheduleSync(d, source) {
   if (!metadataReady) {
     initialSync = d;
@@ -233,16 +236,33 @@ async function fetchRoom() {
 }
 
 // --- отправка действий на сервер ---
+// [НОВОЕ] Анти-спам, предотвращает шторм событий между клиентами!
 function emitAction(paused) {
-  if (sendLock || !player) return;
+  if (!player) return;
+  const now = Date.now();
+  const position = player.currentTime;
+
+  // Не отправляем событие, если оно совпадает с предыдущим (debounce + дельта позиции + статус)
+  if (
+    now - lastSent.time < 200 &&
+    Math.abs(position - lastSent.position) < 0.25 &&
+    paused === lastSent.paused
+  ) {
+    // Лог для отладки, если хочется: раз в 2с
+    if (now - (lastSent.skipLog || 0) > 2000) {
+      console.log('⏳ emitAction SKIP: no changes');
+      lastSent.skipLog = now;
+    }
+    return;
+  }
+
   socket.emit('player_action', {
     roomId,
-    position: player.currentTime,
+    position,
     is_paused: paused,
     speed: player.playbackRate
   });
-  sendLock = true;
-  setTimeout(() => sendLock = false, 180); // быстрая блокировка, чтобы не было спама
+  lastSent = { time: now, position, paused };
 }
 
 // --- UI ---
