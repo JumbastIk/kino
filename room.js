@@ -32,9 +32,8 @@ let metadataReady  = false;
 let sendLock       = false;
 let lastSyncLog    = 0;
 
-// --- Флаги для идеальной seek/play/pause логики
-let skipNextSync = false;
-let lastLocalSeekPaused = false;
+let localSeek = false;
+let wasPausedBeforeSeek = false;
 
 // 🛠 Пинг
 function measurePing() {
@@ -47,16 +46,16 @@ function measurePing() {
 }
 setInterval(measurePing, 10000);
 
-// Логирование sync событий без спама (раз в 1.3 сек)
+// Без спама: sync log не чаще 1.2c
 function logOnce(msg) {
   const now = Date.now();
-  if (now - lastSyncLog > 1300) {
+  if (now - lastSyncLog > 1200) {
     console.log(msg);
     lastSyncLog = now;
   }
 }
 
-// 📡 Подключение и повторный коннект
+// 📡 Подключение
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -89,35 +88,28 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// --- Синхронизация ---
+// --- Синхронизация: main блок ---
 socket.on('sync_state', d => scheduleSync(d, 'sync_state'));
 socket.on('player_update', d => scheduleSync(d, 'player_update'));
 
+// --- rate limit sync --- 
 function scheduleSync(d, source) {
   if (!metadataReady) {
     initialSync = d;
     return;
   }
   clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(d, source), 80);
+  syncTimeout = setTimeout(() => doSync(d, source), 120);
 }
 
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
   if (!player || !metadataReady) return;
 
-  // --- если только что был локальный seek, пропускаем один sync (но не более)
-  if (skipNextSync) {
+  // --- skip первый sync после локального seek ---
+  if (localSeek) {
     player.currentTime = pos;
-    skipNextSync = false;
-
-    // enforce play/pause, если не совпали
-    if (lastLocalSeekPaused !== isPaused) {
-      if (isPaused && !player.paused) player.pause();
-      if (!isPaused && player.paused) player.play().catch(() => {});
-      logOnce(`⏸ doSync SKIPPED (localSeek) + enforce ${isPaused ? 'pause' : 'play'}`);
-    } else {
-      logOnce(`⏸ doSync SKIPPED (localSeek) setTime=${pos.toFixed(2)}`);
-    }
+    logOnce(`⏸ doSync SKIPPED (localSeek) setTime=${pos.toFixed(2)}`);
+    localSeek = false;
     return;
   }
 
@@ -128,21 +120,21 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   const delta = targetTime - player.currentTime;
   const abs = Math.abs(delta);
 
-  // Жёсткая коррекция, если разница большая
-  if (abs > 1.5) {
+  // Jump если > 1.3s (точнее)
+  if (abs > 1.3) {
     player.currentTime = targetTime;
     logOnce(`✔ doSync [${source}] → JUMP: ${targetTime.toFixed(2)} (cur: ${player.currentTime.toFixed(2)})`);
   }
-  // Плавная корректировка скорости, если расхождение не критичное
-  else if (!isPaused && abs > 0.13) {
-    let corr = Math.max(-0.12, Math.min(0.12, delta * 0.45));
+  // Плавная коррекция скорости для мелких рассинхронов
+  else if (!isPaused && abs > 0.09) {
+    let corr = Math.max(-0.08, Math.min(0.08, delta * 0.45));
     player.playbackRate = 1 + corr;
     logOnce(`✔ doSync [${source}] → RATE: ${player.playbackRate.toFixed(3)} (delta ${delta.toFixed(3)})`);
   } else {
     player.playbackRate = 1;
   }
 
-  // --- Ставим play/pause мгновенно, если надо
+  // Мгновенная пауза/воспроизведение
   if (isPaused && !player.paused) {
     isRemoteAction = true;
     player.pause();
@@ -155,10 +147,10 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   setTimeout(() => {
     player.playbackRate = 1;
     isRemoteAction = false;
-  }, 180);
+  }, 250);
 }
 
-// --- инициализация видео ---
+// --- Видео-плеер инициализация ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -209,27 +201,27 @@ async function fetchRoom() {
       if (initialSync) doSync(initialSync, 'init');
     });
 
-    // --- идеальная обработка перемотки и паузы ---
+    // --- seek/play/pause sync flow ---
     v.addEventListener('seeking', () => {
       if (!isRemoteAction) {
-        skipNextSync = true;
-        lastLocalSeekPaused = v.paused;
+        localSeek = true;
+        wasPausedBeforeSeek = v.paused;
       }
     });
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        // Если был paused — после seek сразу ставим паузу и шлём состояние
-        if (lastLocalSeekPaused && !v.paused) v.pause();
+        setTimeout(() => {
+          if (wasPausedBeforeSeek && !v.paused) v.pause();
+        }, 0);
         emitAction(v.paused);
       }
-      lastLocalSeekPaused = false;
+      wasPausedBeforeSeek = false;
     });
-
     v.addEventListener('play', () => {
-      if (!isRemoteAction && !skipNextSync) emitAction(false);
+      if (!isRemoteAction && !localSeek) emitAction(false);
     });
     v.addEventListener('pause', () => {
-      if (!isRemoteAction && !skipNextSync) emitAction(true);
+      if (!isRemoteAction && !localSeek) emitAction(true);
     });
 
     player = v;
@@ -240,6 +232,7 @@ async function fetchRoom() {
   }
 }
 
+// --- отправка действий на сервер ---
 function emitAction(paused) {
   if (sendLock || !player) return;
   socket.emit('player_action', {
@@ -249,10 +242,10 @@ function emitAction(paused) {
     speed: player.playbackRate
   });
   sendLock = true;
-  setTimeout(() => sendLock = false, 150);
+  setTimeout(() => sendLock = false, 180); // быстрая блокировка, чтобы не было спама
 }
 
-// --- UI utils ---
+// --- UI ---
 function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
