@@ -88,112 +88,71 @@ function sendMessage() {
   logOnce(`[chat][me]: ${t}`);
 }
 
-// --- НАДЁЖНАЯ СИНХРОНИЗАЦИЯ --- //
+// --- СИНХРОНИЗАЦИЯ + Восстановление при рассинхроне или ошибках --- //
 let ignoreSyncEvent = false;
-let syncInProgress = false;
-let justSeeked = false; // Новый флаг
+let lastSyncApply = 0;
+let syncProblemDetected = false;
+let syncErrorTimeout = null;
 
-// "План Б" для авто-восстановления sync-зацикливания
-let syncHistory = [];
-let syncBlockUntil = 0;
-const SYNC_LOOP_WINDOW = 1000; // 1 секунда
-const SYNC_LOOP_THRESHOLD = 5; // сколько событий в окне считать за "зацикливание"
-const SYNC_BLOCK_MS = 1200; // время блокировки sync после "Плана Б"
-
-socket.on('sync_state', data => {
+function applySyncState(data) {
   if (!metadataReady || !player) return;
-  if (Date.now() < syncBlockUntil) return;
-  if (syncInProgress) return;
-
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
 
-  // Сохраняем последние sync
-  syncHistory.push(now);
-  syncHistory = syncHistory.filter(t => now - t < SYNC_LOOP_WINDOW);
-  if (syncHistory.length > SYNC_LOOP_THRESHOLD) {
-    logOnce('[SYNC][ПланБ] Detected loop, force-recover');
-    syncBlockUntil = now + SYNC_BLOCK_MS;
-    syncHistory = [];
-    forceRecoverState(data, target);
-    return;
-  }
-
-  // --- Точечная синхронизация времени ---
-  // Только если рассинхрон >0.4s — прыгаем (но не ставим на паузу если playing!)
-  if (Math.abs(player.currentTime - target) > 0.4) {
+  // Если рассинхрон больше 0.5 сек, корректируем позицию
+  if (Math.abs(player.currentTime - target) > 0.5) {
     ignoreSyncEvent = true;
-    syncInProgress = true;
-    justSeeked = true;
     player.currentTime = target;
-    setTimeout(() => {
-      ignoreSyncEvent = false;
-      syncInProgress = false;
-      justSeeked = false;
-    }, 200);
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
-    // После прыжка — не переключаем play/pause насильно!
-    // Это фиксирует твою проблему — не будет паузы после перемотки если нужно playing
-    if (!data.is_paused && player.paused) {
-      player.play().catch(() => {});
-    }
-    if (data.is_paused && !player.paused) {
-      player.pause();
-    }
-    return; // Уже всё сделали
   }
 
-  // --- Корректируем только play/pause если не было seek ---
+  // Корректируем play/pause если отличается
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
-    syncInProgress = true;
     player.pause();
-    setTimeout(() => {
-      ignoreSyncEvent = false;
-      syncInProgress = false;
-    }, 160);
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce('[SYNC] pause');
-  } else if (!data.is_paused && player.paused && !justSeeked) {
-    ignoreSyncEvent = true;
-    syncInProgress = true;
-    player.play().then(() => {
-      setTimeout(() => {
-        ignoreSyncEvent = false;
-        syncInProgress = false;
-      }, 160);
-      logOnce('[SYNC] play');
-    }).catch(() => {
-      ignoreSyncEvent = false;
-      syncInProgress = false;
-    });
   }
-});
+  if (!data.is_paused && player.paused) {
+    ignoreSyncEvent = true;
+    player.play().then(() => {
+      setTimeout(() => { ignoreSyncEvent = false; }, 150);
+      logOnce('[SYNC] play');
+    }).catch(() => { ignoreSyncEvent = false; });
+  }
 
-// План Б: если sync завис, форсируем сброс и возвращаем play/pause
-function forceRecoverState(data, target) {
-  ignoreSyncEvent = true;
-  syncInProgress = true;
-  player.currentTime = target;
-  setTimeout(() => {
-    if (!data.is_paused) {
-      player.play().then(() => {
-        ignoreSyncEvent = false;
-        syncInProgress = false;
-        logOnce('[ПланБ] force play');
-      }).catch(() => {
-        ignoreSyncEvent = false;
-        syncInProgress = false;
-      });
-    } else {
-      player.pause();
-      ignoreSyncEvent = false;
-      syncInProgress = false;
-      logOnce('[ПланБ] force pause');
-    }
-  }, 250);
+  // Зафиксировать время последней нормальной синхронизации
+  lastSyncApply = Date.now();
+  syncProblemDetected = false;
+  if (syncErrorTimeout) {
+    clearTimeout(syncErrorTimeout);
+    syncErrorTimeout = null;
+  }
 }
 
+// ** Главное: если клиент подвис/рассинхрон — запросить актуальное состояние с сервера **
+function planB_RequestServerState() {
+  logOnce('[PLAN B] Force re-sync: request_state');
+  socket.emit('request_state', { roomId });
+}
+
+// Получить sync_state с сервера
+socket.on('sync_state', data => {
+  applySyncState(data);
+
+  // Если sync_state не обновляется слишком долго — триггерим Plan B!
+  if (syncErrorTimeout) clearTimeout(syncErrorTimeout);
+  syncErrorTimeout = setTimeout(() => {
+    if (Date.now() - lastSyncApply > 1600) {
+      syncProblemDetected = true;
+      planB_RequestServerState();
+    }
+  }, 1700);
+});
+
+// При каждом действии — сразу отправляем состояние на сервер
 function emitSyncState() {
   if (!player) return;
   socket.emit('player_action', {
@@ -205,9 +164,13 @@ function emitSyncState() {
 }
 
 function setupSyncHandlers(v) {
-  v.addEventListener('play',   () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
-  v.addEventListener('pause',  () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
-  v.addEventListener('seeked', () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
+  v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
+
+  // Защитное: если обнаружена ошибка плеера — план Б (запросить состояние)
+  v.addEventListener('error',  () => planB_RequestServerState());
+  v.addEventListener('stalled',() => planB_RequestServerState());
 }
 
 // --- Видео-плеер + UI --- //
@@ -249,6 +212,7 @@ async function fetchRoom() {
       hls.on(Hls.Events.ERROR, (e, data) => {
         log(`[HLS ERROR]`, data);
         spinner.style.display = 'none';
+        planB_RequestServerState();
       });
       v.addEventListener('waiting', () => spinner.style.display = 'block');
       v.addEventListener('playing', () => spinner.style.display = 'none');
@@ -260,7 +224,7 @@ async function fetchRoom() {
       metadataReady = true;
       setupSyncHandlers(v);
       player = v;
-      if (initialSync) socket.emit('request_state', { roomId });
+      socket.emit('request_state', { roomId });
       logOnce('[player] loadedmetadata');
     });
 
