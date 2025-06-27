@@ -32,9 +32,9 @@ let metadataReady  = false;
 let sendLock       = false;
 let lastSyncLog    = 0;
 
-// --- флаг для правильного поведения после локального seek
-let localSeek = false;
-let wasPausedBeforeSeek = false;
+// --- Флаги для идеальной seek/play/pause логики
+let skipNextSync = false;
+let lastLocalSeekPaused = false;
 
 // 🛠 Пинг
 function measurePing() {
@@ -47,10 +47,10 @@ function measurePing() {
 }
 setInterval(measurePing, 10000);
 
-// Логирование sync событий без спама (раз в 1.2 сек)
+// Логирование sync событий без спама (раз в 1.3 сек)
 function logOnce(msg) {
   const now = Date.now();
-  if (now - lastSyncLog > 1200) {
+  if (now - lastSyncLog > 1300) {
     console.log(msg);
     lastSyncLog = now;
   }
@@ -89,7 +89,7 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// 🔄 Синхронизация
+// --- Синхронизация ---
 socket.on('sync_state', d => scheduleSync(d, 'sync_state'));
 socket.on('player_update', d => scheduleSync(d, 'player_update'));
 
@@ -99,18 +99,25 @@ function scheduleSync(d, source) {
     return;
   }
   clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(d, source), 100);
+  syncTimeout = setTimeout(() => doSync(d, source), 80);
 }
 
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
   if (!player || !metadataReady) return;
 
-  // --- если только что был локальный seek, игнорируем 1 sync, но обновляем позицию! ---
-  if (localSeek) {
-    // актуализируем позицию чтобы не было дрейфа
+  // --- если только что был локальный seek, пропускаем один sync (но не более)
+  if (skipNextSync) {
     player.currentTime = pos;
-    logOnce(`⏸ doSync SKIPPED (localSeek) setTime=${pos.toFixed(2)}`);
-    localSeek = false;
+    skipNextSync = false;
+
+    // enforce play/pause, если не совпали
+    if (lastLocalSeekPaused !== isPaused) {
+      if (isPaused && !player.paused) player.pause();
+      if (!isPaused && player.paused) player.play().catch(() => {});
+      logOnce(`⏸ doSync SKIPPED (localSeek) + enforce ${isPaused ? 'pause' : 'play'}`);
+    } else {
+      logOnce(`⏸ doSync SKIPPED (localSeek) setTime=${pos.toFixed(2)}`);
+    }
     return;
   }
 
@@ -127,15 +134,15 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
     logOnce(`✔ doSync [${source}] → JUMP: ${targetTime.toFixed(2)} (cur: ${player.currentTime.toFixed(2)})`);
   }
   // Плавная корректировка скорости, если расхождение не критичное
-  else if (!isPaused && abs > 0.12) {
-    let corr = Math.max(-0.10, Math.min(0.10, delta * 0.5));
+  else if (!isPaused && abs > 0.13) {
+    let corr = Math.max(-0.12, Math.min(0.12, delta * 0.45));
     player.playbackRate = 1 + corr;
     logOnce(`✔ doSync [${source}] → RATE: ${player.playbackRate.toFixed(3)} (delta ${delta.toFixed(3)})`);
   } else {
     player.playbackRate = 1;
   }
 
-  // Логика паузы — должна срабатывать моментально, особенно после seek
+  // --- Ставим play/pause мгновенно, если надо
   if (isPaused && !player.paused) {
     isRemoteAction = true;
     player.pause();
@@ -148,7 +155,7 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   setTimeout(() => {
     player.playbackRate = 1;
     isRemoteAction = false;
-  }, 250);
+  }, 180);
 }
 
 // --- инициализация видео ---
@@ -202,30 +209,27 @@ async function fetchRoom() {
       if (initialSync) doSync(initialSync, 'init');
     });
 
-    // ------- ГЛАВНЫЕ ИЗМЕНЕНИЯ для seek/play/pause -------
+    // --- идеальная обработка перемотки и паузы ---
     v.addEventListener('seeking', () => {
       if (!isRemoteAction) {
-        localSeek = true;
-        wasPausedBeforeSeek = v.paused;
+        skipNextSync = true;
+        lastLocalSeekPaused = v.paused;
       }
     });
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        // Если до перемотки было paused — сразу ставим паузу после seek
-        setTimeout(() => {
-          if (wasPausedBeforeSeek && !v.paused) v.pause();
-        }, 0);
-
+        // Если был paused — после seek сразу ставим паузу и шлём состояние
+        if (lastLocalSeekPaused && !v.paused) v.pause();
         emitAction(v.paused);
       }
-      wasPausedBeforeSeek = false;
+      lastLocalSeekPaused = false;
     });
 
     v.addEventListener('play', () => {
-      if (!isRemoteAction && !localSeek) emitAction(false);
+      if (!isRemoteAction && !skipNextSync) emitAction(false);
     });
     v.addEventListener('pause', () => {
-      if (!isRemoteAction && !localSeek) emitAction(true);
+      if (!isRemoteAction && !skipNextSync) emitAction(true);
     });
 
     player = v;
@@ -245,7 +249,7 @@ function emitAction(paused) {
     speed: player.playbackRate
   });
   sendLock = true;
-  setTimeout(() => sendLock = false, 200);
+  setTimeout(() => sendLock = false, 150);
 }
 
 // --- UI utils ---
