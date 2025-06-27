@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.435412214999129992112350.0" />
-  <link rel="stylesheet" href="room.css?v=1.3252999219992121121450.0" />
+  <link rel="stylesheet" href="style.css?v=1.435412214992139129992112350.0" />
+  <link rel="stylesheet" href="room.css?v=1.3252999219992132121121450.0" />
 </head>
 <body>
   <div class="room-container twitch-layout">
@@ -25,15 +25,18 @@
             <button class="custom-btn" id="fullscreenBtn" title="На весь экран">⛶</button>
             <button class="custom-btn chat-toggle-btn" id="openChatBtn" title="Открыть чат">💬</button>
           </div>
-          <!-- Секция ID комнаты -->
-          <div class="room-id-badge" id="roomIdBadge">
-            <small>ID комнаты:</small>
-            <code id="roomIdCode"></code>
-            <button id="copyRoomId">Копировать</button>
-          </div>
         </div>
-        <!-- ===== ПОСТОЯННЫЙ ЧАТ СНИЗУ ===== -->
+        <!-- Секция ID комнаты ПОД ПЛЕЕРОМ -->
+        <div class="room-id-badge" id="roomIdBadge">
+          <small>ID комнаты:</small>
+          <code id="roomIdCode"></code>
+          <button id="copyRoomId">Копировать</button>
+        </div>
+        <!-- ===== Чат ВСЕГДА СНИЗУ ===== -->
         <div class="chat-bottom" id="chatBottom">
+          <div class="chat-header chat-header-bottom">
+            <span>Чат комнаты</span>
+          </div>
           <div class="chat-container">
             <div id="messages" class="chat-messages"></div>
             <div class="chat-input-wrap">
@@ -44,7 +47,7 @@
           </div>
         </div>
       </div>
-      <!-- ===== SIDEBAR CHAT (открывается по кнопке) ===== -->
+      <!-- ===== SIDEBAR CHAT (Twitch-like) ===== -->
       <aside class="chat-sidebar" id="chatSidebar">
         <div class="chat-header">
           <span>Чат комнаты</span>
@@ -67,7 +70,7 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script src="data.js?v=1.0.42133212119992240"></script>
-  <script src="room.js?v=1.0.324012221132999991123213"></script>
+  <script src="data.js?v=1.0.42133212123119992240"></script>
+  <script src="room.js?v=1.0.324012221213132999991123213"></script>
 </body>
 </html>
