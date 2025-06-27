@@ -30,14 +30,15 @@ let initialSync    = null;
 let syncTimeout    = null;
 let metadataReady  = false;
 let lastSyncLog    = 0;
-
 let localSeek = false;
 let wasPausedBeforeSeek = false;
 
-// --- Анти-спам фильтр событий для emitAction
+// --- Анти-шторм: флаг для предотвращения циклов ---
+let ignoreNextEvent = false;
+
 let lastSent = { time: 0, position: 0, paused: null };
 
-// 🛠 Пинг
+// Пинг
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -48,7 +49,7 @@ function measurePing() {
 }
 setInterval(measurePing, 10000);
 
-// Без спама: sync log не чаще 1.2c
+// Логгер
 function logOnce(msg) {
   const now = Date.now();
   if (now - lastSyncLog > 1200) {
@@ -57,7 +58,7 @@ function logOnce(msg) {
   }
 }
 
-// 📡 Подключение
+// Подключение
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -68,7 +69,7 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 
-// 📣 Чат и участники
+// Чат
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
@@ -136,19 +137,20 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
     player.playbackRate = 1;
   }
 
+  // --- ЗАПОМНИТЬ, что это "удалённое" действие! ---
+  ignoreNextEvent = true;
+
   // Мгновенная пауза/воспроизведение
   if (isPaused && !player.paused) {
-    isRemoteAction = true;
     player.pause();
     logOnce(`✔ doSync [${source}] → PAUSE`);
   } else if (!isPaused && player.paused) {
-    isRemoteAction = true;
     player.play().then(() => logOnce(`✔ doSync [${source}] → PLAY`)).catch(() => {});
   }
 
   setTimeout(() => {
     player.playbackRate = 1;
-    isRemoteAction = false;
+    ignoreNextEvent = false;
   }, 250);
 }
 
@@ -205,13 +207,13 @@ async function fetchRoom() {
 
     // --- seek/play/pause sync flow ---
     v.addEventListener('seeking', () => {
-      if (!isRemoteAction) {
+      if (!ignoreNextEvent) {
         localSeek = true;
         wasPausedBeforeSeek = v.paused;
       }
     });
     v.addEventListener('seeked', () => {
-      if (!isRemoteAction) {
+      if (!ignoreNextEvent) {
         setTimeout(() => {
           if (wasPausedBeforeSeek && !v.paused) v.pause();
         }, 0);
@@ -220,10 +222,10 @@ async function fetchRoom() {
       wasPausedBeforeSeek = false;
     });
     v.addEventListener('play', () => {
-      if (!isRemoteAction && !localSeek) emitAction(false);
+      if (!ignoreNextEvent && !localSeek) emitAction(false);
     });
     v.addEventListener('pause', () => {
-      if (!isRemoteAction && !localSeek) emitAction(true);
+      if (!ignoreNextEvent && !localSeek) emitAction(true);
     });
 
     player = v;
@@ -235,19 +237,16 @@ async function fetchRoom() {
 }
 
 // --- отправка действий на сервер ---
-// Анти-спам, предотвращает шторм событий между клиентами!
 function emitAction(paused) {
   if (!player) return;
   const now = Date.now();
   const position = player.currentTime;
 
-  // Не отправляем событие, если оно совпадает с предыдущим (debounce + дельта позиции + статус)
   if (
     now - lastSent.time < 200 &&
     Math.abs(position - lastSent.position) < 0.25 &&
     paused === lastSent.paused
   ) {
-    // Лог для отладки, если хочется: раз в 2с
     if (now - (lastSent.skipLog || 0) > 2000) {
       console.log('⏳ emitAction SKIP: no changes');
       lastSent.skipLog = now;
