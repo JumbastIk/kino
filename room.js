@@ -20,7 +20,7 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player, spinner, lastPing = 0, myUserId = null, initialSync = null;
-let metadataReady = false, lastSyncLog = 0;
+let metadataReady = false, lastSyncLog = 0, syncInProgress = false;
 
 // Логгер (throttle)
 function logOnce(msg) {
@@ -89,41 +89,58 @@ function sendMessage() {
 }
 
 // --- НАДЁЖНАЯ СИНХРОНИЗАЦИЯ --- //
-let ignoreSync = false; // игнорировать события sync на короткое время
+let ignoreSyncEvent = false;
+let syncTimeout;
 
-socket.on('sync_state', sync => {
+socket.on('sync_state', data => {
   if (!metadataReady || !player) return;
-  ignoreSync = true;
+  // Не триггерим эхо свои же событий
+  if (syncInProgress) return;
 
-  // Корректная задержка относительно времени сервера (если сервер отдаёт updatedAt — обязательно учитывать)
   const now = Date.now();
-  let timeSinceUpdate = 0;
-  if ('updatedAt' in sync) {
-    timeSinceUpdate = (now - sync.updatedAt) / 1000;
-  }
-  const targetTime = sync.is_paused ? sync.position : (sync.position + timeSinceUpdate);
+  const timeSinceUpdate = (now - data.updatedAt) / 1000;
+  const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
 
-  // Если рассинхрон >0.4c — мгновенно выставить позицию
-  if (Math.abs(player.currentTime - targetTime) > 0.4) {
-    player.currentTime = targetTime;
-    logOnce(`[SYNC] JUMP to ${targetTime.toFixed(2)}`);
+  // Только если рассинхрон >0.4s — прыгнем
+  if (Math.abs(player.currentTime - target) > 0.4) {
+    ignoreSyncEvent = true;
+    syncInProgress = true;
+    player.currentTime = target;
+    setTimeout(() => { 
+      ignoreSyncEvent = false;
+      syncInProgress = false;
+    }, 200);
+    logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
 
-  // Привести play/pause к состоянию с сервера
-  if (sync.is_paused && !player.paused) {
+  // Корректируем play/pause если отличается
+  if (data.is_paused && !player.paused) {
+    ignoreSyncEvent = true;
+    syncInProgress = true;
     player.pause();
+    setTimeout(() => { 
+      ignoreSyncEvent = false;
+      syncInProgress = false;
+    }, 200);
     logOnce('[SYNC] pause');
   }
-  if (!sync.is_paused && player.paused) {
-    player.play().then(() => logOnce('[SYNC] play')).catch(() => {});
+  if (!data.is_paused && player.paused) {
+    ignoreSyncEvent = true;
+    syncInProgress = true;
+    player.play().then(() => {
+      setTimeout(() => { 
+        ignoreSyncEvent = false;
+        syncInProgress = false;
+      }, 200);
+      logOnce('[SYNC] play');
+    }).catch(()=>{ 
+      ignoreSyncEvent = false; 
+      syncInProgress = false; 
+    });
   }
-
-  // Флаг снимается через 500мс, чтобы не ловить эхо своих же событий
-  setTimeout(() => { ignoreSync = false; }, 500);
 });
 
-// --- Эмит только пользовательских действий --- //
-function emitPlayerAction() {
+function emitSyncState() {
   if (!player) return;
   socket.emit('player_action', {
     roomId,
@@ -133,11 +150,10 @@ function emitPlayerAction() {
   logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
 }
 
-// Вешаем обработчики на реальные действия пользователя
 function setupSyncHandlers(v) {
-  v.addEventListener('play',   () => { if (!ignoreSync) emitPlayerAction(); });
-  v.addEventListener('pause',  () => { if (!ignoreSync) emitPlayerAction(); });
-  v.addEventListener('seeked', () => { if (!ignoreSync) emitPlayerAction(); });
+  v.addEventListener('play',   () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
+  v.addEventListener('pause',  () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
+  v.addEventListener('seeked', () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
 }
 
 // --- Видео-плеер + UI --- //
