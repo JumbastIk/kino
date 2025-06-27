@@ -1,3 +1,4 @@
+// ⚙️ Переменные и инициализация
 const BACKEND = location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
@@ -24,7 +25,6 @@ const sendBtn       = document.getElementById('sendBtn');
 let player;
 let spinner;
 let isRemoteAction = false;
-let lastUpdate     = 0;
 let lastPing       = 0;
 let myUserId       = null;
 let initialSync    = null;
@@ -32,12 +32,7 @@ let syncTimeout    = null;
 let metadataReady  = false;
 let sendLock       = false;
 
-// thresholds
-const HARD_SYNC_THRESHOLD   = 0.3;
-const SOFT_SYNC_THRESHOLD   = 0.05;
-const AUTO_RESYNC_THRESHOLD = 1.0;
-
-// 1) measure RTT
+// 🛠 Настройки синхронизации
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -48,7 +43,6 @@ function measurePing() {
 }
 setInterval(measurePing, 10000);
 
-// 2) on connect
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -59,7 +53,7 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 
-// 3) chat & members
+// 📣 Чат и участники
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
@@ -81,82 +75,56 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// 4) incoming sync
+// 🔄 Синхронизация
 socket.on('sync_state', d => scheduleSync(d));
 socket.on('player_update', d => scheduleSync(d));
 
 function scheduleSync(d) {
-  initialSync = d;
-  if (metadataReady) {
-    clearTimeout(syncTimeout);
-    syncTimeout = setTimeout(() => doSync(d), 100);
-    initialSync = null;
-  }
-}
-
-// 5) doSync
-function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
-  console.log('[doSync START]', {
-    now: Date.now(), serverTs, pos, isPaused,
-    lastUpdate, currentTime: player?.currentTime
-  });
-
-  if (serverTs <= lastUpdate) {
-    console.log('[doSync] skipped due to timestamp', { serverTs, lastUpdate });
+  if (!metadataReady) {
+    initialSync = d;
     return;
   }
-  lastUpdate = serverTs;
+  clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(() => doSync(d), 100);
+}
+
+function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   if (!player || !metadataReady) return;
 
-  isRemoteAction = true;
-
   const now = Date.now();
-  const rttSec = lastPing / 1000;
-  const oneWayDelay = rttSec / 2;
-  const elapsed = (now - serverTs) / 1000;
-  const drift = elapsed - oneWayDelay;
+  const rtt = lastPing || 0;
+  const drift = ((now - serverTs) / 1000) - (rtt / 2000);
+  const targetTime = isPaused ? pos : pos + drift;
+  const delta = targetTime - player.currentTime;
+  const abs = Math.abs(delta);
 
-  const target = isPaused ? pos : pos + drift;
-  const delta = target - player.currentTime;
-  const absD = Math.abs(delta);
-
-  console.log('[doSync]', { drift, target, delta, absD });
-
-  if (absD > AUTO_RESYNC_THRESHOLD) {
-    console.log('[doSync] AUTO_RESYNC_THRESHOLD exceeded → request_state');
-    socket.emit('request_state', { roomId });
-  } else if (absD > HARD_SYNC_THRESHOLD) {
-    console.log('[doSync] HARD_SYNC_THRESHOLD → jump to', target);
-    player.currentTime = target;
-  } else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
-    const rate = 1 + delta * 0.5;
-    console.log('[doSync] SOFT_SYNC_THRESHOLD → adjust rate to', rate);
-    player.playbackRate = rate;
-  } else if (player.playbackRate !== 1) {
+  // Быстрая коррекция
+  if (abs > 1.5) {
+    player.currentTime = targetTime;
+    console.log('✔ doSync → jump', targetTime.toFixed(2));
+  } else if (!isPaused && abs > 0.1) {
+    player.playbackRate = 1 + delta * 0.5;
+    console.log('✔ doSync → rate', player.playbackRate.toFixed(2));
+  } else {
     player.playbackRate = 1;
   }
 
+  // Управление паузой
   if (isPaused && !player.paused) {
-    console.log('[doSync] pausing');
     player.pause();
+    console.log('✔ doSync → pause');
   } else if (!isPaused && player.paused) {
-    console.log('[doSync] playing');
     player.play().catch(() => {});
+    console.log('✔ doSync → play');
   }
-
-  console.log('[doSync END]', {
-    currentTime: player.currentTime,
-    paused: player.paused,
-    playbackRate: player.playbackRate
-  });
 
   setTimeout(() => {
-    isRemoteAction = false;
     player.playbackRate = 1;
+    isRemoteAction = false;
   }, 50);
 }
 
-// 6) fetchRoom & init player
+// 📼 Инициализация видео
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -208,8 +176,8 @@ async function fetchRoom() {
     });
 
     v.addEventListener('seeked', () => !isRemoteAction && emitAction(v.paused));
-    v.addEventListener('play', () => !isRemoteAction && emitAction(false));
-    v.addEventListener('pause', () => !isRemoteAction && emitAction(true));
+    v.addEventListener('play',   () => !isRemoteAction && emitAction(false));
+    v.addEventListener('pause',  () => !isRemoteAction && emitAction(true));
 
     player = v;
 
@@ -219,13 +187,9 @@ async function fetchRoom() {
   }
 }
 
-// 🔧 emitAction (добавлено)
+// 🛰 Действие плеера
 function emitAction(paused) {
-  if (sendLock) return;
-  console.log('[EMIT] player_action', {
-    position: player.currentTime,
-    paused
-  });
+  if (sendLock || !player) return;
   socket.emit('player_action', {
     roomId,
     position: player.currentTime,
@@ -233,10 +197,10 @@ function emitAction(paused) {
     speed: player.playbackRate
   });
   sendLock = true;
-  setTimeout(() => sendLock = false, 150);
+  setTimeout(() => sendLock = false, 100);
 }
 
-// 🔧 createSpinner (добавлено)
+// 🔄 UI utils
 function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
@@ -245,7 +209,6 @@ function createSpinner() {
   return s;
 }
 
-// 🔧 chat helpers (оставлены как есть)
 function appendMessage(author, text) {
   const d = document.createElement('div');
   d.className = 'chat-message';
