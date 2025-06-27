@@ -1,6 +1,4 @@
-const BACKEND = location.hostname.includes('localhost')
-  ? 'http://localhost:3000'
-  : 'https://kino-fhwp.onrender.com';
+const BACKEND = 'https://kino-fhwp.onrender.com';
 
 const socket = io(BACKEND, {
   path: '/socket.io',
@@ -21,36 +19,16 @@ const membersList   = document.getElementById('membersList');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
-let player;
-let spinner;
-let lastPing = 0;
-let myUserId = null;
-let initialSync = null;
-let syncTimeout = null;
-let metadataReady = false;
-let lastSyncLog = 0;
-let localSeek = false;
-let wasPausedBeforeSeek = false;
-let ignoreNextEvent = false;
-let lastSent = { time: 0, position: 0, paused: null };
+let player, spinner, lastPing = 0, myUserId = null, initialSync = null, syncTimeout = null;
+let metadataReady = false, lastSyncLog = 0, localSeek = false, wasPausedBeforeSeek = false;
+let ignoreNextEvent = false, lastSent = { time: 0, position: 0, paused: null };
 
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
-  socket.once('pong', () => {
-    lastPing = Date.now() - t0;
-    logOnce(`[PING] ${lastPing} ms`);
-  });
+  socket.once('pong', () => { lastPing = Date.now() - t0; });
 }
 setInterval(measurePing, 10000);
-
-function logOnce(msg) {
-  const now = Date.now();
-  if (now - lastSyncLog > 1200) {
-    console.log(msg);
-    lastSyncLog = now;
-  }
-}
 
 // --- Подключение и Чат --- //
 socket.on('connect', () => {
@@ -59,9 +37,7 @@ socket.on('connect', () => {
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
-socket.on('reconnect', () => {
-  socket.emit('request_state', { roomId });
-});
+socket.on('reconnect', () => socket.emit('request_state', { roomId }));
 
 socket.on('members', ms => {
   membersList.innerHTML =
@@ -84,24 +60,23 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// --- СИНХРОНИЗАЦИЯ (Только через sync_state) --- //
-socket.on('sync_state', d => scheduleSync(d, 'sync_state'));
+// --- СИНХРОНИЗАЦИЯ --- //
+socket.on('sync_state', d => scheduleSync(d));
 
-function scheduleSync(d, source) {
+function scheduleSync(d) {
   if (!metadataReady) {
     initialSync = d;
     return;
   }
   clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(d, source), 100);
+  syncTimeout = setTimeout(() => doSync(d), 100);
 }
 
-function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
+function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   if (!player || !metadataReady) return;
 
   if (localSeek) {
     player.currentTime = pos;
-    logOnce(`⏸ doSync SKIP (localSeek) setTime=${pos.toFixed(2)}`);
     localSeek = false;
     return;
   }
@@ -113,28 +88,18 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   const delta = targetTime - player.currentTime;
   const abs = Math.abs(delta);
 
-  // HARD JUMP if abs > 1s
   if (abs > 1.0) {
     player.currentTime = targetTime;
-    logOnce(`✔ doSync [${source}] → JUMP: ${targetTime.toFixed(2)} (cur: ${player.currentTime.toFixed(2)})`);
-  }
-  // Soft playbackRate adjust
-  else if (!isPaused && abs > 0.05) {
+  } else if (!isPaused && abs > 0.05) {
     let corr = Math.max(-0.07, Math.min(0.07, delta * 0.42));
     player.playbackRate = 1 + corr;
-    logOnce(`✔ doSync [${source}] → RATE: ${player.playbackRate.toFixed(3)} (delta ${delta.toFixed(3)})`);
   } else {
     player.playbackRate = 1;
   }
 
   ignoreNextEvent = true;
-
-  if (isPaused && !player.paused) {
-    player.pause();
-    logOnce(`✔ doSync [${source}] → PAUSE`);
-  } else if (!isPaused && player.paused) {
-    player.play().then(() => logOnce(`✔ doSync [${source}] → PLAY`)).catch(() => {});
-  }
+  if (isPaused && !player.paused) player.pause();
+  else if (!isPaused && player.paused) player.play().catch(() => {});
 
   setTimeout(() => {
     player.playbackRate = 1;
@@ -142,7 +107,7 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   }, 250);
 }
 
-// --- Видео-плеер инициализация + UI --- //
+// --- Видео-плеер + UI --- //
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -178,10 +143,7 @@ async function fetchRoom() {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
-      hls.on(Hls.Events.ERROR, (e, data) => {
-        console.error('HLS ERROR', data);
-        spinner.style.display = 'none';
-      });
+      hls.on(Hls.Events.ERROR, () => { spinner.style.display = 'none'; });
       v.addEventListener('waiting', () => spinner.style.display = 'block');
       v.addEventListener('playing', () => spinner.style.display = 'none');
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
@@ -190,10 +152,10 @@ async function fetchRoom() {
 
     v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
-      if (initialSync) doSync(initialSync, 'init');
+      if (initialSync) doSync(initialSync);
     });
 
-    // --- События отправлять только на сервер --- //
+    // --- Только РЕАЛЬНЫЕ действия пользователя --- //
     v.addEventListener('seeking', () => {
       if (!ignoreNextEvent) {
         localSeek = true;
@@ -223,7 +185,7 @@ async function fetchRoom() {
   }
 }
 
-// --- Emit только реальных действий пользователя --- //
+// --- Emit только пользовательских действий --- //
 function emitAction(paused) {
   if (!player) return;
   const now = Date.now();
@@ -234,13 +196,8 @@ function emitAction(paused) {
     Math.abs(position - lastSent.position) < 0.22 &&
     paused === lastSent.paused
   ) {
-    if (now - (lastSent.skipLog || 0) > 2000) {
-      console.log('⏳ emitAction SKIP: no changes');
-      lastSent.skipLog = now;
-    }
     return;
   }
-
   socket.emit('player_action', {
     roomId,
     position,
