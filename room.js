@@ -31,6 +31,7 @@ let initialSync    = null;
 let syncTimeout    = null;
 let metadataReady  = false;
 let sendLock       = false;
+let recentLocalSeek = false; // 🆕 добавлен флаг локальной перемотки
 
 // 🛠 Настройки синхронизации
 function measurePing() {
@@ -89,7 +90,10 @@ function scheduleSync(d) {
 }
 
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
-  if (!player || !metadataReady) return;
+  if (!player || !metadataReady || recentLocalSeek) {
+    if (recentLocalSeek) console.log('⏸ doSync skipped (recent local seek)');
+    return;
+  }
 
   const now = Date.now();
   const rtt = lastPing || 0;
@@ -174,7 +178,13 @@ async function fetchRoom() {
       if (initialSync) doSync(initialSync);
     });
 
-    v.addEventListener('seeked', () => !isRemoteAction && emitAction(v.paused));
+    v.addEventListener('seeked', () => {
+      if (!isRemoteAction) {
+        recentLocalSeek = true;
+        setTimeout(() => recentLocalSeek = false, 1500);
+        emitAction(v.paused);
+      }
+    });
     v.addEventListener('play',   () => !isRemoteAction && emitAction(false));
     v.addEventListener('pause',  () => !isRemoteAction && emitAction(true));
 

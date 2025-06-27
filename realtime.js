@@ -2,7 +2,7 @@ const supabase = require('./supabase');
 
 const roomsState = {};
 const broadcastTimers = {};
-const BROADCAST_INTERVAL = 3000; // больше интервал — меньше лишних sync
+const BROADCAST_INTERVAL = 3000;
 
 function calculatePosition(roomId) {
   const s = roomsState[roomId];
@@ -59,7 +59,8 @@ module.exports = function (io) {
           { onConflict: ['room_id', 'user_id'] }
         );
 
-        const { data: members } = await supabase.from('room_members')
+        const { data: members } = await supabase
+          .from('room_members')
           .select('user_id')
           .eq('room_id', roomId);
         io.to(roomId).emit('members', members);
@@ -86,10 +87,9 @@ module.exports = function (io) {
           console.log(`[Init] Initialized state for room ${roomId}`);
         }
 
-        // Отправка текущего состояния только подключившемуся
         socket.emit('sync_state', calculatePosition(roomId));
-
         scheduleBroadcast(io, roomId);
+
       } catch (err) {
         console.error('[Join Error]', err.message);
       }
@@ -121,12 +121,9 @@ module.exports = function (io) {
           updatedAt: now
         };
 
-        // ВАЖНО: отправляем player_update ВСЕМ, кроме отправителя
         socket.to(roomId).emit('player_update', updateData);
-
         console.log(`[Player Action] from ${socket.id} in room ${roomId}`, updateData);
 
-        // не трогаем broadcast, он теперь реже
       } catch (err) {
         console.error('[Player Action Error]', err.message);
       }
@@ -172,8 +169,8 @@ module.exports = function (io) {
         });
 
         console.log(`[Disconnect] User ${userId} left room ${currentRoom}`);
-
         clearBroadcast(io, currentRoom);
+
       } catch (err) {
         console.error('[Disconnect Error]', err.message);
       }
