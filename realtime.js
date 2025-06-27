@@ -1,15 +1,12 @@
 const supabase = require('./supabase');
 
-const roomsState      = {};
+const roomsState = {};
 const broadcastTimers = {};
-const BROADCAST_INTERVAL = 2000;
+const BROADCAST_INTERVAL = 3000; // больше интервал — меньше лишних sync
 
-// Вычисляем актуальную позицию
 function calculatePosition(roomId) {
   const s = roomsState[roomId];
-  if (!s) {
-    return { position: 0, is_paused: true, speed: 1, updatedAt: Date.now() };
-  }
+  if (!s) return { position: 0, is_paused: true, speed: 1, updatedAt: Date.now() };
 
   const now = Date.now();
   const elapsed = (now - s.updatedAt) / 1000;
@@ -23,7 +20,6 @@ function calculatePosition(roomId) {
   };
 }
 
-// Запускаем регулярную рассылку sync_state
 function scheduleBroadcast(io, roomId) {
   if (broadcastTimers[roomId]) return;
 
@@ -36,18 +32,17 @@ function scheduleBroadcast(io, roomId) {
   console.log(`[Schedule] Started broadcast timer for room ${roomId}`);
 }
 
-// Очищаем, если никого нет
 function clearBroadcast(io, roomId) {
   const room = io.sockets.adapter.rooms.get(roomId);
   if (!room || room.size === 0) {
     clearInterval(broadcastTimers[roomId]);
     delete broadcastTimers[roomId];
     delete roomsState[roomId];
-    console.log(`[Clear] Stopped broadcast and cleared state for room ${roomId}`);
+    console.log(`[Clear] Stopped broadcast timer and cleared state for room ${roomId}`);
   }
 }
 
-module.exports = function(io) {
+module.exports = function (io) {
   io.on('connection', socket => {
     let currentRoom = null;
     let userId = null;
@@ -64,11 +59,9 @@ module.exports = function(io) {
           { onConflict: ['room_id', 'user_id'] }
         );
 
-        const { data: members } = await supabase
-          .from('room_members')
+        const { data: members } = await supabase.from('room_members')
           .select('user_id')
           .eq('room_id', roomId);
-
         io.to(roomId).emit('members', members);
 
         io.to(roomId).emit('system_message', {
@@ -81,10 +74,8 @@ module.exports = function(io) {
           .select('author, text, created_at')
           .eq('room_id', roomId)
           .order('created_at', { ascending: true });
-
         socket.emit('history', messages);
 
-        // Инициализация состояния
         if (!roomsState[roomId]) {
           roomsState[roomId] = {
             time: 0,
@@ -95,12 +86,10 @@ module.exports = function(io) {
           console.log(`[Init] Initialized state for room ${roomId}`);
         }
 
-        // Отправка начального состояния
+        // Отправка текущего состояния только подключившемуся
         socket.emit('sync_state', calculatePosition(roomId));
 
-        clearBroadcast(io, roomId);
         scheduleBroadcast(io, roomId);
-
       } catch (err) {
         console.error('[Join Error]', err.message);
       }
@@ -111,11 +100,8 @@ module.exports = function(io) {
       socket.emit('sync_state', calculatePosition(roomId));
     });
 
-    socket.on('ping', () => {
-      socket.emit('pong');
-    });
+    socket.on('ping', () => socket.emit('pong'));
 
-    // Обновление состояния от клиента — без рассылки другим
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       try {
         if (typeof position !== 'number' || position < 0) return;
@@ -128,11 +114,19 @@ module.exports = function(io) {
           updatedAt: now
         };
 
-        console.log(`[Player Action] updated state for room ${roomId}`, roomsState[roomId]);
+        const updateData = {
+          position,
+          is_paused,
+          speed: speed || 1,
+          updatedAt: now
+        };
 
-        clearBroadcast(io, roomId);
-        scheduleBroadcast(io, roomId);
+        // ВАЖНО: отправляем player_update ВСЕМ, кроме отправителя
+        socket.to(roomId).emit('player_update', updateData);
 
+        console.log(`[Player Action] from ${socket.id} in room ${roomId}`, updateData);
+
+        // не трогаем broadcast, он теперь реже
       } catch (err) {
         console.error('[Player Action Error]', err.message);
       }
@@ -151,10 +145,8 @@ module.exports = function(io) {
           text: msg.text,
           created_at: new Date().toISOString()
         };
-
         io.to(msg.roomId).emit('chat_message', chatMsg);
         console.log(`[Chat Message] in room ${msg.roomId}`, chatMsg);
-
       } catch (err) {
         console.error('[Chat Error]', err.message);
       }
@@ -172,7 +164,6 @@ module.exports = function(io) {
           .from('room_members')
           .select('user_id')
           .eq('room_id', currentRoom);
-
         io.to(currentRoom).emit('members', members);
 
         io.to(currentRoom).emit('system_message', {

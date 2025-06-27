@@ -98,30 +98,29 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   const delta = targetTime - player.currentTime;
   const abs = Math.abs(delta);
 
-  // Быстрая коррекция
   if (abs > 1.5) {
     player.currentTime = targetTime;
     console.log('✔ doSync → jump', targetTime.toFixed(2));
-  } else if (!isPaused && abs > 0.1) {
+  } else if (!isPaused && abs > 0.08) {
     player.playbackRate = 1 + delta * 0.5;
     console.log('✔ doSync → rate', player.playbackRate.toFixed(2));
   } else {
     player.playbackRate = 1;
   }
 
-  // Управление паузой
   if (isPaused && !player.paused) {
+    isRemoteAction = true;
     player.pause();
     console.log('✔ doSync → pause');
   } else if (!isPaused && player.paused) {
-    player.play().catch(() => {});
-    console.log('✔ doSync → play');
+    isRemoteAction = true;
+    player.play().then(() => console.log('✔ doSync → play')).catch(() => {});
   }
 
   setTimeout(() => {
     player.playbackRate = 1;
     isRemoteAction = false;
-  }, 50);
+  }, 80);
 }
 
 // 📼 Инициализация видео
@@ -197,7 +196,7 @@ function emitAction(paused) {
     speed: player.playbackRate
   });
   sendLock = true;
-  setTimeout(() => sendLock = false, 100);
+  setTimeout(() => sendLock = false, 150);
 }
 
 // 🔄 UI utils
