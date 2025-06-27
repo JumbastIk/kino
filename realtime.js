@@ -2,7 +2,7 @@ const supabase = require('./supabase');
 
 const roomsState = {};
 const broadcastTimers = {};
-const BROADCAST_INTERVAL = 20000; // 20 секунд — чисто для страховки/поддержки sync
+const BROADCAST_INTERVAL = 20000; // 20 секунд — только для страховки/поддержки sync
 
 function calculatePosition(roomId) {
   const s = roomsState[roomId];
@@ -102,7 +102,7 @@ module.exports = function (io) {
 
     socket.on('ping', () => socket.emit('pong'));
 
-    // --- Критическая правка: теперь ВСЕ действия пользователя рассылаются sync_state всем! ---
+    // --- ВСЕ действия игрока мгновенно рассылаются sync_state всем участникам
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       try {
         if (typeof position !== 'number' || position < 0) return;
@@ -123,7 +123,6 @@ module.exports = function (io) {
         };
 
         io.to(roomId).emit('sync_state', updateData);
-        // убран player_update — sync_state теперь единственный источник истины!
         console.log(`[Player Action][SYNC] from ${socket.id} in room ${roomId}`, updateData);
 
       } catch (err) {
