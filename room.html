@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.43541249999992112350.0" />
-  <link rel="stylesheet" href="room.css?v=1.325299999921121450.0" />
+  <link rel="stylesheet" href="style.css?v=1.4354124999129992112350.0" />
+  <link rel="stylesheet" href="room.css?v=1.32529999992121121450.0" />
 </head>
 <body>
   <div class="room-container twitch-layout">
@@ -32,19 +32,31 @@
             <button id="copyRoomId">Копировать</button>
           </div>
         </div>
+        <!-- ===== ПОСТОЯННЫЙ ЧАТ СНИЗУ ===== -->
+        <div class="chat-bottom" id="chatBottom">
+          <div class="chat-container">
+            <div id="messages" class="chat-messages"></div>
+            <div class="chat-input-wrap">
+              <input id="msgInput" placeholder="Введите сообщение…" autocomplete="off" />
+              <button id="sendBtn" class="send-btn">Отправить</button>
+            </div>
+            <div id="membersList" class="chat-members"></div>
+          </div>
+        </div>
       </div>
+      <!-- ===== SIDEBAR CHAT (открывается по кнопке) ===== -->
       <aside class="chat-sidebar" id="chatSidebar">
         <div class="chat-header">
           <span>Чат комнаты</span>
           <button class="custom-btn chat-close-btn" id="closeChatBtn" title="Закрыть чат">✖</button>
         </div>
         <div class="chat-container">
-          <div id="messages" class="chat-messages"></div>
+          <div id="messagesSidebar" class="chat-messages"></div>
           <div class="chat-input-wrap">
-            <input id="msgInput" placeholder="Введите сообщение…" autocomplete="off" />
-            <button id="sendBtn" class="send-btn">Отправить</button>
+            <input id="msgInputSidebar" placeholder="Введите сообщение…" autocomplete="off" />
+            <button id="sendBtnSidebar" class="send-btn">Отправить</button>
           </div>
-          <div id="membersList" class="chat-members"></div>
+          <div id="membersListSidebar" class="chat-members"></div>
         </div>
       </aside>
     </div>

@@ -25,24 +25,28 @@ const currentTimeLabel = document.getElementById('currentTimeLabel');
 const durationLabel = document.getElementById('durationLabel');
 const chatSidebar = document.getElementById('chatSidebar');
 const closeChatBtn = document.getElementById('closeChatBtn');
+const chatBottom = document.getElementById('chatBottom');
 const messagesBox = document.getElementById('messages');
 const membersList = document.getElementById('membersList');
 const msgInput = document.getElementById('msgInput');
 const sendBtn = document.getElementById('sendBtn');
 const backLink = document.getElementById('backLink');
-
 const roomIdBadge = document.getElementById('roomIdBadge');
 const roomIdCode = document.getElementById('roomIdCode');
 const copyRoomId = document.getElementById('copyRoomId');
+// sidebar chat
+const messagesSidebar = document.getElementById('messagesSidebar');
+const membersListSidebar = document.getElementById('membersListSidebar');
+const msgInputSidebar = document.getElementById('msgInputSidebar');
+const sendBtnSidebar = document.getElementById('sendBtnSidebar');
 
 let player = video, spinner, lastPing = 0, myUserId = null;
 let metadataReady = false, lastSyncLog = 0;
 let ignoreSyncEvent = false, lastSyncApply = 0, syncProblemDetected = false, syncErrorTimeout = null;
-
-// --- Управление доступностью контролов ---
 let readyForControl = false;
-disableControls();
 
+// Контролы неактивны до sync
+disableControls();
 function enableControls() {
   playPauseBtn.style.pointerEvents = '';
   muteBtn.style.pointerEvents = '';
@@ -68,9 +72,12 @@ function disableControls() {
   progressContainer.style.opacity = '.6';
 }
 
-// --- Логика Чата Twitch ---
+// --- Логика Twitch-чата (нижний всегда, sidebar поверх) ---
+// Кнопка чата открывает sidebar, нижний чат всегда открыт!
 openChatBtn.addEventListener('click', () => {
   chatSidebar.classList.add('open');
+  syncSidebarWithBottom();
+  setTimeout(()=>msgInputSidebar && msgInputSidebar.focus(),100);
 });
 closeChatBtn.addEventListener('click', () => {
   chatSidebar.classList.remove('open');
@@ -78,6 +85,63 @@ closeChatBtn.addEventListener('click', () => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') chatSidebar.classList.remove('open');
 });
+
+// Синхронизировать сообщения/участников между чатами
+function syncSidebarWithBottom() {
+  if(messagesSidebar && messagesBox) messagesSidebar.innerHTML = messagesBox.innerHTML;
+  if(membersListSidebar && membersList) membersListSidebar.innerHTML = membersList.innerHTML;
+}
+
+// Сообщения дублируются и в нижний, и в боковой чат!
+function appendMessage(author, text) {
+  const d1 = document.createElement('div');
+  d1.className = 'chat-message';
+  d1.innerHTML = `<strong>${author}:</strong> ${text}`;
+  messagesBox.appendChild(d1);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+  // sidebar
+  if(messagesSidebar){
+    const d2 = document.createElement('div');
+    d2.className = 'chat-message';
+    d2.innerHTML = `<strong>${author}:</strong> ${text}`;
+    messagesSidebar.appendChild(d2);
+    messagesSidebar.scrollTop = messagesSidebar.scrollHeight;
+  }
+}
+function appendSystemMessage(text) {
+  const d1 = document.createElement('div');
+  d1.className = 'chat-message system-message';
+  d1.innerHTML = `<em>${text}</em>`;
+  messagesBox.appendChild(d1);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+  // sidebar
+  if(messagesSidebar){
+    const d2 = document.createElement('div');
+    d2.className = 'chat-message system-message';
+    d2.innerHTML = `<em>${text}</em>`;
+    messagesSidebar.appendChild(d2);
+    messagesSidebar.scrollTop = messagesSidebar.scrollHeight;
+  }
+}
+
+// Отправка сообщений
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+if (sendBtnSidebar) sendBtnSidebar.addEventListener('click', sendMessageSidebar);
+if (msgInputSidebar) msgInputSidebar.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessageSidebar(); });
+
+function sendMessage() {
+  const t = msgInput.value.trim();
+  if (!t) return;
+  socket.emit('chat_message', { roomId, author: 'Гость', text: t });
+  msgInput.value = '';
+}
+function sendMessageSidebar() {
+  const t = msgInputSidebar.value.trim();
+  if (!t) return;
+  socket.emit('chat_message', { roomId, author: 'Гость', text: t });
+  msgInputSidebar.value = '';
+}
 
 // --- Логгер (throttle) ---
 function logOnce(msg) {
@@ -116,33 +180,19 @@ socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
     `<ul>${ms.map(m => `<li>${m.user_id || m.id}</li>`).join('')}</ul>`;
-  logOnce(`[members] ${ms.length}: ${ms.map(m => m.user_id || m.id).join(', ')}`);
+  if(membersListSidebar) membersListSidebar.innerHTML = membersList.innerHTML;
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
+  if(messagesSidebar) messagesSidebar.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
-  logOnce(`[history] сообщений: ${data.length}`);
 });
 socket.on('chat_message', m => {
-  logOnce(`[chat] ${m.author}: ${m.text}`);
   appendMessage(m.author, m.text);
 });
 socket.on('system_message', msg => {
-  if (msg?.text) {
-    logOnce(`[system] ${msg.text}`);
-    appendSystemMessage(msg.text);
-  }
+  if (msg?.text) appendSystemMessage(msg.text);
 });
-
-sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
-function sendMessage() {
-  const t = msgInput.value.trim();
-  if (!t) return;
-  socket.emit('chat_message', { roomId, author: 'Гость', text: t });
-  msgInput.value = '';
-  logOnce(`[chat][me]: ${t}`);
-}
 
 // --- СИНХРОНИЗАЦИЯ --- //
 function applySyncState(data) {
@@ -150,15 +200,12 @@ function applySyncState(data) {
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
-
-  // Рассинхрон больше 0.5 сек — корректируем
   if (Math.abs(player.currentTime - target) > 0.5) {
     ignoreSyncEvent = true;
     player.currentTime = target;
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
-  // Play/pause state
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
     player.pause();
@@ -178,20 +225,16 @@ function applySyncState(data) {
     clearTimeout(syncErrorTimeout);
     syncErrorTimeout = null;
   }
-
-  // Первый раз включаем контролы только после синхронизации!
   if (!readyForControl) {
     readyForControl = true;
     enableControls();
     hideSpinner();
   }
 }
-
 function planB_RequestServerState() {
   logOnce('[PLAN B] Force re-sync: request_state');
   socket.emit('request_state', { roomId });
 }
-
 socket.on('sync_state', data => {
   applySyncState(data);
   if (syncErrorTimeout) clearTimeout(syncErrorTimeout);
@@ -202,7 +245,6 @@ socket.on('sync_state', data => {
     }
   }, 1700);
 });
-
 function emitSyncState() {
   if (!player) return;
   socket.emit('player_action', {
@@ -222,8 +264,7 @@ async function fetchRoom() {
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
-
-    // Секция ID комнаты (Twitch-style badge)
+    // Room ID badge
     if (roomIdBadge && roomIdCode && copyRoomId) {
       roomIdCode.textContent = roomId;
       copyRoomId.onclick = () => {
@@ -231,8 +272,6 @@ async function fetchRoom() {
         alert('Скопировано!');
       };
     }
-
-    // (Плеер уже в html)
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
@@ -267,7 +306,6 @@ async function fetchRoom() {
   }
 }
 
-// --- Custom Twitch Controls Logic ---
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
@@ -307,7 +345,6 @@ function setupSyncHandlers(v) {
   v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
   v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
   v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
-
   v.addEventListener('error',  () => planB_RequestServerState());
   v.addEventListener('stalled',() => planB_RequestServerState());
 }
@@ -352,20 +389,4 @@ function formatTime(t) {
   t = Math.floor(t || 0);
   if (t >= 3600) return `${Math.floor(t/3600)}:${String(Math.floor((t%3600)/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
   else return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
-}
-
-// --- Сообщения чата ---
-function appendMessage(author, text) {
-  const d = document.createElement('div');
-  d.className = 'chat-message';
-  d.innerHTML = `<strong>${author}:</strong> ${text}`;
-  messagesBox.appendChild(d);
-  messagesBox.scrollTop = messagesBox.scrollHeight;
-}
-function appendSystemMessage(text) {
-  const d = document.createElement('div');
-  d.className = 'chat-message system-message';
-  d.innerHTML = `<em>${text}</em>`;
-  messagesBox.appendChild(d);
-  messagesBox.scrollTop = messagesBox.scrollHeight;
 }
