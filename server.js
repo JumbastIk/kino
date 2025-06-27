@@ -136,5 +136,29 @@ const io = new Server(server, {
 // ==== Подключение realtime.js для socket.io ====
 require('./realtime')(io);
 
+// ========== ДОБАВЛЕНО: ===================
+// --- Для синхронизации времени и пинга каждого пользователя ---
+const roomUserStats = {};
+
+io.on('connection', socket => {
+  // Принимаем время и пинг от пользователя и рассылаем всем в комнате каждую секунду
+  socket.on('update_time', ({ roomId, user_id, currentTime, ping }) => {
+    if (!roomUserStats[roomId]) roomUserStats[roomId] = {};
+    roomUserStats[roomId][user_id] = { currentTime, ping };
+    io.to(roomId).emit('room_stats_update', { users: roomUserStats[roomId] });
+  });
+
+  // (Необязательно, но желательно) очищаем инфу при дисконнекте
+  socket.on('disconnecting', () => {
+    for (const roomId of socket.rooms) {
+      if (roomUserStats[roomId] && socket.id in roomUserStats[roomId]) {
+        delete roomUserStats[roomId][socket.id];
+        io.to(roomId).emit('room_stats_update', { users: roomUserStats[roomId] });
+      }
+    }
+  });
+});
+// ========== КОНЕЦ ДОБАВЛЕНИЯ ==============
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server started on port ${PORT}`));
