@@ -29,10 +29,44 @@ const messagesBox = document.getElementById('messages');
 const membersList = document.getElementById('membersList');
 const msgInput = document.getElementById('msgInput');
 const sendBtn = document.getElementById('sendBtn');
+const backLink = document.getElementById('backLink');
 
-let player = video, spinner, lastPing = 0, myUserId = null, initialSync = null;
+const roomIdBadge = document.getElementById('roomIdBadge');
+const roomIdCode = document.getElementById('roomIdCode');
+const copyRoomId = document.getElementById('copyRoomId');
+
+let player = video, spinner, lastPing = 0, myUserId = null;
 let metadataReady = false, lastSyncLog = 0;
 let ignoreSyncEvent = false, lastSyncApply = 0, syncProblemDetected = false, syncErrorTimeout = null;
+
+// --- Управление доступностью контролов ---
+let readyForControl = false;
+disableControls();
+
+function enableControls() {
+  playPauseBtn.style.pointerEvents = '';
+  muteBtn.style.pointerEvents = '';
+  fullscreenBtn.style.pointerEvents = '';
+  openChatBtn.style.pointerEvents = '';
+  progressContainer.style.pointerEvents = '';
+  playPauseBtn.style.opacity = '';
+  muteBtn.style.opacity = '';
+  fullscreenBtn.style.opacity = '';
+  openChatBtn.style.opacity = '';
+  progressContainer.style.opacity = '';
+}
+function disableControls() {
+  playPauseBtn.style.pointerEvents = 'none';
+  muteBtn.style.pointerEvents = 'none';
+  fullscreenBtn.style.pointerEvents = 'none';
+  openChatBtn.style.pointerEvents = 'none';
+  progressContainer.style.pointerEvents = 'none';
+  playPauseBtn.style.opacity = '.6';
+  muteBtn.style.opacity = '.6';
+  fullscreenBtn.style.opacity = '.6';
+  openChatBtn.style.opacity = '.6';
+  progressContainer.style.opacity = '.6';
+}
 
 // --- Логика Чата Twitch ---
 openChatBtn.addEventListener('click', () => {
@@ -144,6 +178,13 @@ function applySyncState(data) {
     clearTimeout(syncErrorTimeout);
     syncErrorTimeout = null;
   }
+
+  // Первый раз включаем контролы только после синхронизации!
+  if (!readyForControl) {
+    readyForControl = true;
+    enableControls();
+    hideSpinner();
+  }
 }
 
 function planB_RequestServerState() {
@@ -181,6 +222,16 @@ async function fetchRoom() {
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
+
+    // Секция ID комнаты (Twitch-style badge)
+    if (roomIdBadge && roomIdCode && copyRoomId) {
+      roomIdCode.textContent = roomId;
+      copyRoomId.onclick = () => {
+        navigator.clipboard.writeText(roomId);
+        alert('Скопировано!');
+      };
+    }
+
     // (Плеер уже в html)
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
@@ -208,7 +259,7 @@ async function fetchRoom() {
       durationLabel.textContent = formatTime(player.duration || 0);
     });
     setupCustomControls();
-    hideSpinner();
+    showSpinner();
     logOnce('[player] инициализирован');
   } catch (err) {
     console.error(err);
@@ -219,20 +270,24 @@ async function fetchRoom() {
 // --- Custom Twitch Controls Logic ---
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
+    if (!readyForControl) return;
     if (player.paused) player.play();
     else player.pause();
   });
   muteBtn.addEventListener('click', () => {
+    if (!readyForControl) return;
     player.muted = !player.muted;
     updateMuteIcon();
   });
   fullscreenBtn.addEventListener('click', () => {
+    if (!readyForControl) return;
     if (player.requestFullscreen) player.requestFullscreen();
     else if (player.webkitRequestFullscreen) player.webkitRequestFullscreen();
     else if (player.msRequestFullscreen) player.msRequestFullscreen();
   });
 
   progressContainer.addEventListener('click', e => {
+    if (!readyForControl) return;
     const rect = progressContainer.getBoundingClientRect();
     const percent = (e.clientX - rect.left) / rect.width;
     player.currentTime = player.duration * percent;
@@ -246,6 +301,15 @@ function setupCustomControls() {
 
   updatePlayIcon();
   updateMuteIcon();
+}
+
+function setupSyncHandlers(v) {
+  v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
+
+  v.addEventListener('error',  () => planB_RequestServerState());
+  v.addEventListener('stalled',() => planB_RequestServerState());
 }
 
 function updateProgressBar() {

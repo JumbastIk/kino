@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.435412412350.0" />
-  <link rel="stylesheet" href="room.css?v=1.3252211450.0" />
+  <link rel="stylesheet" href="style.css?v=1.43541249999992112350.0" />
+  <link rel="stylesheet" href="room.css?v=1.325299999921121450.0" />
 </head>
 <body>
   <div class="room-container twitch-layout">
@@ -24,6 +24,12 @@
             <button class="custom-btn" id="muteBtn" title="Звук">🔊</button>
             <button class="custom-btn" id="fullscreenBtn" title="На весь экран">⛶</button>
             <button class="custom-btn chat-toggle-btn" id="openChatBtn" title="Открыть чат">💬</button>
+          </div>
+          <!-- Секция ID комнаты -->
+          <div class="room-id-badge" id="roomIdBadge">
+            <small>ID комнаты:</small>
+            <code id="roomIdCode"></code>
+            <button id="copyRoomId">Копировать</button>
           </div>
         </div>
       </div>
@@ -49,7 +55,7 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script src="data.js?v=1.0.4213321240"></script>
-  <script src="room.js?v=1.0.324012213123213"></script>
+  <script src="data.js?v=1.0.421332119992240"></script>
+  <script src="room.js?v=1.0.3240122132999991123213"></script>
 </body>
 </html>
