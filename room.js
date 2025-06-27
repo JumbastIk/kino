@@ -1,5 +1,3 @@
-// room.js
-
 const BACKEND = location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
@@ -32,8 +30,11 @@ let initialSync    = null;
 let syncTimeout    = null;
 let metadataReady  = false;
 let sendLock       = false;
-let recentLocalSeek = false;
 let lastSyncLog    = 0;
+
+// --- флаг для правильного поведения после локального seek
+let localSeek = false;
+let wasPausedBeforeSeek = false;
 
 // 🛠 Пинг
 function measurePing() {
@@ -101,11 +102,15 @@ function scheduleSync(d, source) {
   syncTimeout = setTimeout(() => doSync(d, source), 100);
 }
 
-// --- КЛЮЧЕВАЯ ЛОГИКА синхронизации --- //
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
   if (!player || !metadataReady) return;
-  if (recentLocalSeek) {
-    logOnce('⏸ doSync SKIPPED (recent local seek)');
+
+  // --- если только что был локальный seek, игнорируем 1 sync, но обновляем позицию! ---
+  if (localSeek) {
+    // актуализируем позицию чтобы не было дрейфа
+    player.currentTime = pos;
+    logOnce(`⏸ doSync SKIPPED (localSeek) setTime=${pos.toFixed(2)}`);
+    localSeek = false;
     return;
   }
 
@@ -146,7 +151,7 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   }, 250);
 }
 
-// 📼 Инициализация видео
+// --- инициализация видео ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -197,23 +202,31 @@ async function fetchRoom() {
       if (initialSync) doSync(initialSync, 'init');
     });
 
-    // --- Перемотка/Seek: при паузе — не даём видео начать играть! --- //
+    // ------- ГЛАВНЫЕ ИЗМЕНЕНИЯ для seek/play/pause -------
     v.addEventListener('seeking', () => {
-      if (!isRemoteAction) recentLocalSeek = true;
+      if (!isRemoteAction) {
+        localSeek = true;
+        wasPausedBeforeSeek = v.paused;
+      }
     });
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        setTimeout(() => recentLocalSeek = false, 1200);
+        // Если до перемотки было paused — сразу ставим паузу после seek
+        setTimeout(() => {
+          if (wasPausedBeforeSeek && !v.paused) v.pause();
+        }, 0);
+
         emitAction(v.paused);
-        // Если пользователь был на паузе до seek, возвращаем паузу МГНОВЕННО
-        if (v.paused) {
-          setTimeout(() => { if (!v.paused) v.pause(); }, 20); // "kick" если вдруг пошло play
-        }
       }
+      wasPausedBeforeSeek = false;
     });
 
-    v.addEventListener('play', () => !isRemoteAction && emitAction(false));
-    v.addEventListener('pause', () => !isRemoteAction && emitAction(true));
+    v.addEventListener('play', () => {
+      if (!isRemoteAction && !localSeek) emitAction(false);
+    });
+    v.addEventListener('pause', () => {
+      if (!isRemoteAction && !localSeek) emitAction(true);
+    });
 
     player = v;
 
@@ -223,7 +236,6 @@ async function fetchRoom() {
   }
 }
 
-// 🛰 Действие плеера
 function emitAction(paused) {
   if (sendLock || !player) return;
   socket.emit('player_action', {
@@ -236,7 +248,7 @@ function emitAction(paused) {
   setTimeout(() => sendLock = false, 200);
 }
 
-// 🔄 UI utils
+// --- UI utils ---
 function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
