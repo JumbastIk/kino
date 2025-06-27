@@ -23,33 +23,61 @@ let player, spinner, lastPing = 0, myUserId = null, initialSync = null, syncTime
 let metadataReady = false, lastSyncLog = 0, localSeek = false, wasPausedBeforeSeek = false;
 let ignoreNextEvent = false, lastSent = { time: 0, position: 0, paused: null };
 
+// Логгер (throttle)
+function logOnce(msg) {
+  const now = Date.now();
+  if (now - lastSyncLog > 600) {
+    console.log(msg);
+    lastSyncLog = now;
+  }
+}
+function log(msg) { console.log(msg); }
+
+// Пинг
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
-  socket.once('pong', () => { lastPing = Date.now() - t0; });
+  socket.once('pong', () => {
+    lastPing = Date.now() - t0;
+    logOnce(`[PING] ${lastPing} ms`);
+  });
 }
 setInterval(measurePing, 10000);
 
 // --- Подключение и Чат --- //
 socket.on('connect', () => {
   myUserId = socket.id;
+  log(`[connect] id=${myUserId}`);
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
-socket.on('reconnect', () => socket.emit('request_state', { roomId }));
+socket.on('reconnect', () => {
+  log('[reconnect]');
+  socket.emit('request_state', { roomId });
+});
 
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
     `<ul>${ms.map(m => `<li>${m.user_id || m.id}</li>`).join('')}</ul>`;
+  logOnce(`[members] ${ms.length}: ${ms.map(m => m.user_id || m.id).join(', ')}`);
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
+  logOnce(`[history] сообщений: ${data.length}`);
 });
-socket.on('chat_message', m => appendMessage(m.author, m.text));
-socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
+socket.on('chat_message', m => {
+  logOnce(`[chat] ${m.author}: ${m.text}`);
+  appendMessage(m.author, m.text);
+});
+socket.on('system_message', msg => {
+  if (msg?.text) {
+    logOnce(`[system] ${msg.text}`);
+    appendSystemMessage(msg.text);
+  }
+});
 
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
@@ -58,25 +86,34 @@ function sendMessage() {
   if (!t) return;
   socket.emit('chat_message', { roomId, author: 'Гость', text: t });
   msgInput.value = '';
+  logOnce(`[chat][me]: ${t}`);
 }
 
 // --- СИНХРОНИЗАЦИЯ --- //
-socket.on('sync_state', d => scheduleSync(d));
+socket.on('sync_state', d => {
+  logOnce(`[sync_state] ← ${JSON.stringify(d)}`);
+  scheduleSync(d, 'sync_state');
+});
 
-function scheduleSync(d) {
+function scheduleSync(d, source) {
   if (!metadataReady) {
     initialSync = d;
+    logOnce(`[scheduleSync][${source}] metadataReady=0 (отложено)`);
     return;
   }
   clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(d), 100);
+  syncTimeout = setTimeout(() => doSync(d, source), 100);
 }
 
-function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
-  if (!player || !metadataReady) return;
+function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
+  if (!player || !metadataReady) {
+    log(`[doSync][${source}] !player || !metadataReady`);
+    return;
+  }
 
   if (localSeek) {
     player.currentTime = pos;
+    logOnce(`⏸ doSync [${source}] SKIP (localSeek) setTime=${pos.toFixed(2)}`);
     localSeek = false;
     return;
   }
@@ -88,18 +125,29 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   const delta = targetTime - player.currentTime;
   const abs = Math.abs(delta);
 
+  // JUMP > 1.0s
   if (abs > 1.0) {
+    logOnce(`✔ doSync [${source}] → JUMP: ${targetTime.toFixed(2)} (cur: ${player.currentTime.toFixed(2)})`);
     player.currentTime = targetTime;
-  } else if (!isPaused && abs > 0.05) {
+  }
+  // Smooth playbackRate
+  else if (!isPaused && abs > 0.05) {
     let corr = Math.max(-0.07, Math.min(0.07, delta * 0.42));
     player.playbackRate = 1 + corr;
+    logOnce(`✔ doSync [${source}] → RATE: ${player.playbackRate.toFixed(3)} (delta ${delta.toFixed(3)})`);
   } else {
     player.playbackRate = 1;
   }
 
   ignoreNextEvent = true;
-  if (isPaused && !player.paused) player.pause();
-  else if (!isPaused && player.paused) player.play().catch(() => {});
+
+  if (isPaused && !player.paused) {
+    player.pause();
+    logOnce(`✔ doSync [${source}] → PAUSE`);
+  }
+  else if (!isPaused && player.paused) {
+    player.play().then(() => logOnce(`✔ doSync [${source}] → PLAY`)).catch(() => {});
+  }
 
   setTimeout(() => {
     player.playbackRate = 1;
@@ -143,7 +191,10 @@ async function fetchRoom() {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
       hls.attachMedia(v);
-      hls.on(Hls.Events.ERROR, () => { spinner.style.display = 'none'; });
+      hls.on(Hls.Events.ERROR, (e, data) => {
+        log(`[HLS ERROR]`, data);
+        spinner.style.display = 'none';
+      });
       v.addEventListener('waiting', () => spinner.style.display = 'block');
       v.addEventListener('playing', () => spinner.style.display = 'none');
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
@@ -152,14 +203,16 @@ async function fetchRoom() {
 
     v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
-      if (initialSync) doSync(initialSync);
+      if (initialSync) doSync(initialSync, 'init');
+      logOnce('[player] loadedmetadata');
     });
 
-    // --- Только РЕАЛЬНЫЕ действия пользователя --- //
+    // Только РЕАЛЬНЫЕ действия пользователя:
     v.addEventListener('seeking', () => {
       if (!ignoreNextEvent) {
         localSeek = true;
         wasPausedBeforeSeek = v.paused;
+        logOnce('[player] seeking');
       }
     });
     v.addEventListener('seeked', () => {
@@ -168,17 +221,25 @@ async function fetchRoom() {
           if (wasPausedBeforeSeek && !v.paused) v.pause();
         }, 0);
         emitAction(v.paused);
+        logOnce('[player] seeked emitAction');
       }
       wasPausedBeforeSeek = false;
     });
     v.addEventListener('play', () => {
-      if (!ignoreNextEvent && !localSeek) emitAction(false);
+      if (!ignoreNextEvent && !localSeek) {
+        emitAction(false);
+        logOnce('[player] play emitAction');
+      }
     });
     v.addEventListener('pause', () => {
-      if (!ignoreNextEvent && !localSeek) emitAction(true);
+      if (!ignoreNextEvent && !localSeek) {
+        emitAction(true);
+        logOnce('[player] pause emitAction');
+      }
     });
 
     player = v;
+    logOnce('[player] инициализирован');
   } catch (err) {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
@@ -196,6 +257,10 @@ function emitAction(paused) {
     Math.abs(position - lastSent.position) < 0.22 &&
     paused === lastSent.paused
   ) {
+    if (now - (lastSent.skipLog || 0) > 1200) {
+      logOnce('⏳ emitAction SKIP: no changes');
+      lastSent.skipLog = now;
+    }
     return;
   }
   socket.emit('player_action', {
@@ -205,6 +270,7 @@ function emitAction(paused) {
     speed: player.playbackRate
   });
   lastSent = { time: now, position, paused };
+  logOnce(`[emitAction] ${paused ? 'pause' : 'play'} @${position.toFixed(3)}`);
 }
 
 // --- UI --- //
