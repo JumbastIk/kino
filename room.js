@@ -1,4 +1,3 @@
-// Добавил улучшения: защиту от резких изменений и дополнительную проверку перед синхронизацией.
 const BACKEND = location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
@@ -60,11 +59,29 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 
-// 3) chat & members (без изменений)
-// ...
-// твой существующий код для чата и участников остался без изменений.
+// 3) chat & members
+socket.on('members', ms => {
+  membersList.innerHTML =
+    `<div class="chat-members-label">Участники (${ms.length}):</div>` +
+    `<ul>${ms.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
+});
+socket.on('history', data => {
+  messagesBox.innerHTML = '';
+  data.forEach(m => appendMessage(m.author, m.text));
+});
+socket.on('chat_message', m => appendMessage(m.author, m.text));
+socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
 
-// 4) incoming sync с дополнительной защитой от частых вызовов
+function sendMessage() {
+  const t = msgInput.value.trim();
+  if (!t) return;
+  socket.emit('chat_message', { roomId, author: 'Гость', text: t });
+  msgInput.value = '';
+}
+
+// 4) incoming sync
 socket.on('sync_state', d => scheduleSync(d));
 socket.on('player_update', d => scheduleSync(d));
 
@@ -72,12 +89,12 @@ function scheduleSync(d) {
   initialSync = d;
   if (metadataReady) {
     clearTimeout(syncTimeout);
-    syncTimeout = setTimeout(() => doSync(d), 100); // небольшая задержка для стабильности
+    syncTimeout = setTimeout(() => doSync(d), 100);
     initialSync = null;
   }
 }
 
-// 5) улучшенный doSync с проверкой на адекватность drift
+// 5) doSync
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   console.log('[doSync START]', {
     now: Date.now(), serverTs, pos, isPaused,
@@ -108,17 +125,14 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   if (absD > AUTO_RESYNC_THRESHOLD) {
     console.log('[doSync] AUTO_RESYNC_THRESHOLD exceeded → request_state');
     socket.emit('request_state', { roomId });
-  }
-  else if (absD > HARD_SYNC_THRESHOLD) {
+  } else if (absD > HARD_SYNC_THRESHOLD) {
     console.log('[doSync] HARD_SYNC_THRESHOLD → jump to', target);
     player.currentTime = target;
-  }
-  else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
+  } else if (!isPaused && absD > SOFT_SYNC_THRESHOLD) {
     const rate = 1 + delta * 0.5;
     console.log('[doSync] SOFT_SYNC_THRESHOLD → adjust rate to', rate);
     player.playbackRate = rate;
-  }
-  else if (player.playbackRate !== 1) {
+  } else if (player.playbackRate !== 1) {
     player.playbackRate = 1;
   }
 
@@ -142,7 +156,7 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   }, 50);
 }
 
-// 6) fetchRoom & init player (добавил event listener на ошибки HLS)
+// 6) fetchRoom & init player
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -205,4 +219,45 @@ async function fetchRoom() {
   }
 }
 
-// Остальные твои helper-функции без изменений.
+// 🔧 emitAction (добавлено)
+function emitAction(paused) {
+  if (sendLock) return;
+  console.log('[EMIT] player_action', {
+    position: player.currentTime,
+    paused
+  });
+  socket.emit('player_action', {
+    roomId,
+    position: player.currentTime,
+    is_paused: paused,
+    speed: player.playbackRate
+  });
+  sendLock = true;
+  setTimeout(() => sendLock = false, 150);
+}
+
+// 🔧 createSpinner (добавлено)
+function createSpinner() {
+  const s = document.createElement('div');
+  s.className = 'buffer-spinner';
+  s.innerHTML = `<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
+  s.style.display = 'none';
+  return s;
+}
+
+// 🔧 chat helpers (оставлены как есть)
+function appendMessage(author, text) {
+  const d = document.createElement('div');
+  d.className = 'chat-message';
+  d.innerHTML = `<strong>${author}:</strong> ${text}`;
+  messagesBox.appendChild(d);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+}
+
+function appendSystemMessage(text) {
+  const d = document.createElement('div');
+  d.className = 'chat-message system-message';
+  d.innerHTML = `<em>${text}</em>`;
+  messagesBox.appendChild(d);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
+}
