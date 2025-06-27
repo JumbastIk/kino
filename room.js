@@ -12,15 +12,28 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-const playerWrapper = document.getElementById('playerWrapper');
-const backLink      = document.getElementById('backLink');
-const messagesBox   = document.getElementById('messages');
-const membersList   = document.getElementById('membersList');
-const msgInput      = document.getElementById('msgInput');
-const sendBtn       = document.getElementById('sendBtn');
+const playerWrapper   = document.getElementById('playerWrapper');
+const backLink        = document.getElementById('backLink');
+const messagesBox     = document.getElementById('messages');
+const membersList     = document.getElementById('membersList');
+const msgInput        = document.getElementById('msgInput');
+const sendBtn         = document.getElementById('sendBtn');
 
-let player, spinner, lastPing = 0, myUserId = null, initialSync = null;
-let metadataReady = false, lastSyncLog = 0;
+const player          = document.getElementById('videoPlayer');
+const playPauseBtn    = document.getElementById('playPauseBtn');
+const muteBtn         = document.getElementById('muteBtn');
+const fullscreenBtn   = document.getElementById('fullscreenBtn');
+const progressBar     = document.getElementById('progressBar');
+const progressCont    = document.getElementById('progressContainer');
+const timeLabel       = document.getElementById('currentTimeLabel');
+const durationLabel   = document.getElementById('durationLabel');
+const openChatBtn     = document.getElementById('openChatBtn');
+const chatSidebar     = document.getElementById('chatSidebar');
+const closeChatBtn    = document.getElementById('closeChatBtn');
+
+let spinner, lastPing = 0, myUserId = null;
+let metadataReady = false, lastSyncLog = 0, videoDuration = 0;
+let ignoreSyncEvent = false, lastSyncApply = 0, syncErrorTimeout = null, syncProblemDetected = false;
 
 // Логгер (throttle)
 function logOnce(msg) {
@@ -88,12 +101,7 @@ function sendMessage() {
   logOnce(`[chat][me]: ${t}`);
 }
 
-// --- СИНХРОНИЗАЦИЯ + Восстановление при рассинхроне или ошибках --- //
-let ignoreSyncEvent = false;
-let lastSyncApply = 0;
-let syncProblemDetected = false;
-let syncErrorTimeout = null;
-
+// --- СИНХРОНИЗАЦИЯ + Восстановление --- //
 function applySyncState(data) {
   if (!metadataReady || !player) return;
   const now = Date.now();
@@ -132,17 +140,15 @@ function applySyncState(data) {
   }
 }
 
-// ** Главное: если клиент подвис/рассинхрон — запросить актуальное состояние с сервера **
+// Главное: если клиент подвис/рассинхрон — запросить актуальное состояние с сервера
 function planB_RequestServerState() {
   logOnce('[PLAN B] Force re-sync: request_state');
   socket.emit('request_state', { roomId });
 }
 
-// Получить sync_state с сервера
 socket.on('sync_state', data => {
   applySyncState(data);
 
-  // Если sync_state не обновляется слишком долго — триггерим Plan B!
   if (syncErrorTimeout) clearTimeout(syncErrorTimeout);
   syncErrorTimeout = setTimeout(() => {
     if (Date.now() - lastSyncApply > 1600) {
@@ -152,7 +158,6 @@ socket.on('sync_state', data => {
   }, 1700);
 });
 
-// При каждом действии — сразу отправляем состояние на сервер
 function emitSyncState() {
   if (!player) return;
   socket.emit('player_action', {
@@ -167,13 +172,11 @@ function setupSyncHandlers(v) {
   v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
   v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
   v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
-
-  // Защитное: если обнаружена ошибка плеера — план Б (запросить состояние)
   v.addEventListener('error',  () => planB_RequestServerState());
   v.addEventListener('stalled',() => planB_RequestServerState());
 }
 
-// --- Видео-плеер + UI --- //
+// --- Видео-плеер + кастомные контроллы --- //
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -183,57 +186,116 @@ async function fetchRoom() {
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
 
     backLink.href = `${movie.html}?id=${movie.id}`;
-    playerWrapper.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.style.position = 'relative';
-    wrap.innerHTML = `<video id="videoPlayer" controls muted playsinline crossorigin="anonymous"
-      style="width:100%;border-radius:14px;"></video>`;
+
+    // Прячем стандартные контроллы и сбрасываем
+    player.removeAttribute('controls');
+    player.muted = true;
+    player.playsInline = true;
+    player.crossOrigin = "anonymous";
+    player.src = '';
+
     spinner = createSpinner();
-    wrap.appendChild(spinner);
-    playerWrapper.appendChild(wrap);
+    if (!playerWrapper.querySelector('.buffer-spinner')) playerWrapper.appendChild(spinner);
 
-    const badge = document.createElement('div');
-    badge.className = 'room-id-badge';
-    badge.innerHTML = `
-      <small>ID комнаты:</small><code>${roomId}</code>
-      <button id="copyRoomId">Копировать</button>
-    `;
-    playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick = () => {
-      navigator.clipboard.writeText(roomId);
-      alert('Скопировано');
-    };
-
-    const v = document.getElementById('videoPlayer');
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
-      hls.attachMedia(v);
+      hls.attachMedia(player);
       hls.on(Hls.Events.ERROR, (e, data) => {
         log(`[HLS ERROR]`, data);
         spinner.style.display = 'none';
         planB_RequestServerState();
       });
-      v.addEventListener('waiting', () => spinner.style.display = 'block');
-      v.addEventListener('playing', () => spinner.style.display = 'none');
-    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-      v.src = movie.videoUrl;
+      player.addEventListener('waiting', () => spinner.style.display = 'block');
+      player.addEventListener('playing', () => spinner.style.display = 'none');
+    } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+      player.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
 
-    v.addEventListener('loadedmetadata', () => {
+    player.addEventListener('loadedmetadata', () => {
       metadataReady = true;
-      setupSyncHandlers(v);
-      player = v;
+      videoDuration = player.duration;
+      updateTimeLabels();
+      setupSyncHandlers(player);
       socket.emit('request_state', { roomId });
       logOnce('[player] loadedmetadata');
     });
 
-    player = v;
-    logOnce('[player] инициализирован');
+    player.addEventListener('timeupdate', updateTimeLabels);
+    player.addEventListener('durationchange', updateTimeLabels);
+    player.addEventListener('ended', () => updatePlayPauseBtn());
+
+    // Кастомные контроллы
+    playPauseBtn.addEventListener('click', () => {
+      if (player.paused) player.play();
+      else player.pause();
+    });
+    muteBtn.addEventListener('click', () => {
+      player.muted = !player.muted;
+      updateMuteBtn();
+    });
+    fullscreenBtn.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else playerWrapper.requestFullscreen();
+    });
+
+    // Twitch: кастомный прогрессбар
+    progressCont.addEventListener('click', e => {
+      const rect = progressCont.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, x / rect.width));
+      player.currentTime = pct * (player.duration || 0);
+      emitSyncState();
+    });
+
+    // UI-кнопки для чата (показ/скрытие)
+    openChatBtn.addEventListener('click', () => {
+      chatSidebar.classList.add('open');
+      if (window.innerWidth < 950) chatSidebar.scrollIntoView({behavior:'smooth'});
+    });
+    closeChatBtn.addEventListener('click', () => {
+      chatSidebar.classList.remove('open');
+    });
+
+    // При клике вне сайдбара на мобилке — скрыть чат
+    document.addEventListener('click', e => {
+      if (window.innerWidth < 950 && chatSidebar.classList.contains('open')) {
+        if (!chatSidebar.contains(e.target) && !openChatBtn.contains(e.target)) {
+          chatSidebar.classList.remove('open');
+        }
+      }
+    });
+
+    updatePlayPauseBtn();
+    updateMuteBtn();
+    updateTimeLabels();
   } catch (err) {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
+}
+
+// ======= Кастомные контроллы =======
+function updatePlayPauseBtn() {
+  playPauseBtn.textContent = player.paused ? "▶️" : "⏸";
+}
+function updateMuteBtn() {
+  muteBtn.textContent = player.muted ? "🔇" : "🔊";
+}
+function updateTimeLabels() {
+  timeLabel.textContent = formatTime(player.currentTime);
+  durationLabel.textContent = formatTime(player.duration || 0);
+  // прогрессбар как у Twitch
+  const percent = (player.currentTime / (player.duration || 1));
+  progressBar.style.width = (percent * 100) + "%";
+  updatePlayPauseBtn();
+  updateMuteBtn();
+}
+function formatTime(sec) {
+  if (isNaN(sec)) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 // --- UI --- //
