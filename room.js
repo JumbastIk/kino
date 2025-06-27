@@ -252,6 +252,14 @@ function emitAction(paused) {
   const now = Date.now();
   const position = player.currentTime;
 
+  // ---- LOG CRITICAL: что отправляем на сервер! ----
+  log(`[emitAction][EMIT]`, {
+    roomId,
+    position: +position.toFixed(5),
+    is_paused: paused,
+    speed: player.playbackRate
+  });
+
   if (
     now - lastSent.time < 200 &&
     Math.abs(position - lastSent.position) < 0.22 &&

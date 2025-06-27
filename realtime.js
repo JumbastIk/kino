@@ -83,6 +83,8 @@ module.exports = function (io) {
           console.log(`[Init] Initialized state for room ${roomId}`);
         }
 
+        // ЛОГ — Начальный стейт при входе
+        console.log(`[Emit sync_state][JOIN] to ${socket.id} in room ${roomId}`, calculatePosition(roomId));
         socket.emit('sync_state', calculatePosition(roomId));
         scheduleBroadcast(io, roomId);
 
@@ -93,7 +95,10 @@ module.exports = function (io) {
 
     socket.on('request_state', ({ roomId }) => {
       console.log(`[Request State] for room ${roomId}`);
-      socket.emit('sync_state', calculatePosition(roomId));
+      const syncData = calculatePosition(roomId);
+      // ЛОГ — Запрос состояния
+      console.log(`[Emit sync_state][REQUEST_STATE] to ${socket.id} in room ${roomId}`, syncData);
+      socket.emit('sync_state', syncData);
     });
 
     socket.on('ping', () => socket.emit('pong'));
@@ -101,7 +106,14 @@ module.exports = function (io) {
     // --- ВСЕ действия игрока мгновенно рассылаются sync_state всем участникам!
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       try {
-        if (typeof position !== 'number' || position < 0) return;
+        // ЛОГ — что пришло с клиента
+        console.log(`[Player Action][RECV] from ${socket.id} room=${roomId} position=${position} paused=${is_paused} speed=${speed}`);
+
+        if (typeof position !== 'number' || position < 0) {
+          console.warn(`[Player Action][BAD POSITION]`, position);
+          return;
+        }
+
         const now = Date.now();
         roomsState[roomId] = {
           time: position,
@@ -109,14 +121,22 @@ module.exports = function (io) {
           speed: speed || 1,
           updatedAt: now
         };
+
+        // ЛОГ — что реально сохранено на сервере
+        console.log(`[Player Action][ROOM STATE] room=${roomId}`, roomsState[roomId]);
+
         const updateData = {
           position,
           is_paused,
           speed: speed || 1,
           updatedAt: now
         };
+
+        // ЛОГ — что рассылается обратно
+        console.log(`[Emit sync_state][PLAYER_ACTION] to room ${roomId}`, updateData);
+
         io.to(roomId).emit('sync_state', updateData);
-        console.log(`[Player Action][SYNC] from ${socket.id} in room ${roomId}`, updateData);
+
       } catch (err) {
         console.error('[Player Action Error]', err.message);
       }
