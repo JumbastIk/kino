@@ -23,22 +23,18 @@ const sendBtn       = document.getElementById('sendBtn');
 
 let player;
 let spinner;
-let isRemoteAction = false;
-let lastPing       = 0;
-let myUserId       = null;
-let initialSync    = null;
-let syncTimeout    = null;
-let metadataReady  = false;
-let lastSyncLog    = 0;
+let lastPing = 0;
+let myUserId = null;
+let initialSync = null;
+let syncTimeout = null;
+let metadataReady = false;
+let lastSyncLog = 0;
 let localSeek = false;
 let wasPausedBeforeSeek = false;
-
-// --- Анти-шторм: флаг для предотвращения циклов ---
 let ignoreNextEvent = false;
-
 let lastSent = { time: 0, position: 0, paused: null };
 
-// Пинг
+// --- ПИНГ для компенсации лага --- //
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -49,7 +45,6 @@ function measurePing() {
 }
 setInterval(measurePing, 10000);
 
-// Логгер
 function logOnce(msg) {
   const now = Date.now();
   if (now - lastSyncLog > 1200) {
@@ -58,7 +53,7 @@ function logOnce(msg) {
   }
 }
 
-// Подключение
+// --- Подключение и Чат --- //
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -69,7 +64,7 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 
-// Чат
+// --- Чат и участники --- //
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
@@ -81,9 +76,9 @@ socket.on('history', data => {
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
+
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
-
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
@@ -91,27 +86,26 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// --- Синхронизация: main блок ---
+// --- СИНХРОНИЗАЦИЯ (только через sync_state от сервера!) --- //
 socket.on('sync_state', d => scheduleSync(d, 'sync_state'));
-socket.on('player_update', d => scheduleSync(d, 'player_update'));
+socket.on('player_update', d => scheduleSync(d, 'player_update')); // (если сервер поддерживает)
 
-// --- rate limit sync ---
 function scheduleSync(d, source) {
   if (!metadataReady) {
     initialSync = d;
     return;
   }
   clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(d, source), 120);
+  syncTimeout = setTimeout(() => doSync(d, source), 100);
 }
 
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
   if (!player || !metadataReady) return;
 
-  // --- skip первый sync после локального seek ---
+  // --- пропустить sync сразу после seek локально ---
   if (localSeek) {
     player.currentTime = pos;
-    logOnce(`⏸ doSync SKIPPED (localSeek) setTime=${pos.toFixed(2)}`);
+    logOnce(`⏸ doSync SKIP (localSeek) setTime=${pos.toFixed(2)}`);
     localSeek = false;
     return;
   }
@@ -123,12 +117,10 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   const delta = targetTime - player.currentTime;
   const abs = Math.abs(delta);
 
-  // Jump если > 1.3s (точнее)
   if (abs > 1.3) {
     player.currentTime = targetTime;
     logOnce(`✔ doSync [${source}] → JUMP: ${targetTime.toFixed(2)} (cur: ${player.currentTime.toFixed(2)})`);
   }
-  // Плавная коррекция скорости для мелких рассинхронов
   else if (!isPaused && abs > 0.09) {
     let corr = Math.max(-0.08, Math.min(0.08, delta * 0.45));
     player.playbackRate = 1 + corr;
@@ -137,10 +129,8 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
     player.playbackRate = 1;
   }
 
-  // --- ЗАПОМНИТЬ, что это "удалённое" действие! ---
   ignoreNextEvent = true;
 
-  // Мгновенная пауза/воспроизведение
   if (isPaused && !player.paused) {
     player.pause();
     logOnce(`✔ doSync [${source}] → PAUSE`);
@@ -154,7 +144,7 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   }, 250);
 }
 
-// --- Видео-плеер инициализация ---
+// --- Видео-плеер инициализация + UI --- //
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -173,6 +163,7 @@ async function fetchRoom() {
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
+    // --- Room badge (ID) ---
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -205,7 +196,7 @@ async function fetchRoom() {
       if (initialSync) doSync(initialSync, 'init');
     });
 
-    // --- seek/play/pause sync flow ---
+    // --- ТОЛЬКО отправка событий на сервер ---
     v.addEventListener('seeking', () => {
       if (!ignoreNextEvent) {
         localSeek = true;
@@ -229,14 +220,13 @@ async function fetchRoom() {
     });
 
     player = v;
-
   } catch (err) {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
-// --- отправка действий на сервер ---
+// --- Emit только реальных действий пользователя ---
 function emitAction(paused) {
   if (!player) return;
   const now = Date.now();
@@ -271,7 +261,6 @@ function createSpinner() {
   s.style.display = 'none';
   return s;
 }
-
 function appendMessage(author, text) {
   const d = document.createElement('div');
   d.className = 'chat-message';
@@ -279,7 +268,6 @@ function appendMessage(author, text) {
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-
 function appendSystemMessage(text) {
   const d = document.createElement('div');
   d.className = 'chat-message system-message';
