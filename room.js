@@ -20,7 +20,7 @@ const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
 let player, spinner, lastPing = 0, myUserId = null, initialSync = null;
-let metadataReady = false, lastSyncLog = 0, syncInProgress = false;
+let metadataReady = false, lastSyncLog = 0;
 
 // Логгер (throttle)
 function logOnce(msg) {
@@ -90,12 +90,10 @@ function sendMessage() {
 
 // --- НАДЁЖНАЯ СИНХРОНИЗАЦИЯ --- //
 let ignoreSyncEvent = false;
-let syncTimeout;
+let justSeeked = false;
 
 socket.on('sync_state', data => {
   if (!metadataReady || !player) return;
-  // Не триггерим эхо свои же событий
-  if (syncInProgress) return;
 
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
@@ -104,40 +102,28 @@ socket.on('sync_state', data => {
   // Только если рассинхрон >0.4s — прыгнем
   if (Math.abs(player.currentTime - target) > 0.4) {
     ignoreSyncEvent = true;
-    syncInProgress = true;
     player.currentTime = target;
-    setTimeout(() => { 
-      ignoreSyncEvent = false;
-      syncInProgress = false;
-    }, 200);
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
 
-  // Корректируем play/pause если отличается
-  if (data.is_paused && !player.paused) {
+  // Корректируем play/pause если отличается,
+  // но НЕ триггерим автопаузу если только что был seek
+  if (data.is_paused && !player.paused && !justSeeked) {
     ignoreSyncEvent = true;
-    syncInProgress = true;
     player.pause();
-    setTimeout(() => { 
-      ignoreSyncEvent = false;
-      syncInProgress = false;
-    }, 200);
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce('[SYNC] pause');
   }
-  if (!data.is_paused && player.paused) {
+  if (!data.is_paused && player.paused && !justSeeked) {
     ignoreSyncEvent = true;
-    syncInProgress = true;
     player.play().then(() => {
-      setTimeout(() => { 
-        ignoreSyncEvent = false;
-        syncInProgress = false;
-      }, 200);
+      setTimeout(() => { ignoreSyncEvent = false; }, 150);
       logOnce('[SYNC] play');
-    }).catch(()=>{ 
-      ignoreSyncEvent = false; 
-      syncInProgress = false; 
-    });
+    }).catch(()=>{ ignoreSyncEvent = false; });
   }
+  // После любого sync сбрасываем флаг seeked
+  setTimeout(() => { justSeeked = false; }, 150);
 });
 
 function emitSyncState() {
@@ -151,9 +137,17 @@ function emitSyncState() {
 }
 
 function setupSyncHandlers(v) {
-  v.addEventListener('play',   () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
-  v.addEventListener('pause',  () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
-  v.addEventListener('seeked', () => { if (!ignoreSyncEvent && !syncInProgress) emitSyncState(); });
+  v.addEventListener('play',   () => { if (!ignoreSyncEvent && !justSeeked) emitSyncState(); });
+  v.addEventListener('pause',  () => { if (!ignoreSyncEvent && !justSeeked) emitSyncState(); });
+  v.addEventListener('seeking', () => { justSeeked = true; });
+  v.addEventListener('seeked', () => {
+    // Если до seek видео не было на паузе, принудительно play после seek
+    setTimeout(() => {
+      if (!player.paused) player.play();
+      justSeeked = false;
+    }, 10);
+    if (!ignoreSyncEvent) emitSyncState();
+  });
 }
 
 // --- Видео-плеер + UI --- //
