@@ -1,4 +1,4 @@
-/* ===== Сброс ===== */
+/* ===== ОБЩИЙ СБРОС ===== */
 html, body {
   margin: 0;
   padding: 0;
@@ -9,169 +9,73 @@ html, body {
   overflow-x: hidden;
 }
 
-/* ===== Ссылка Назад ===== */
+/* ===== Шапка ===== */
 .back-link {
+  position: fixed;
+  top: env(safe-area-inset-top, 12px);
+  left: 18px;
+  z-index: 3000;
   color: #a970ff;
   text-decoration: none;
   font-size: 17px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  transition: color 0.2s;
   background: rgba(30,29,40,0.9);
   padding: 8px 14px;
   border-radius: 20px;
   box-shadow: 0 2px 8px rgba(80,50,140,0.07);
-  display: inline-block;
-  margin-bottom: 8px;
+  transition: color 0.2s;
 }
-.back-link:hover {
-  color: #d2a4ff;
-}
+.back-link:hover { color: #d2a4ff; }
 
-/* ===== Инфо-блок ===== */
-.room-info {
-  width: 100vw;
-  max-width: 1080px;
-  margin: 0 auto 24px auto;
-  padding: 30px 12px 0 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 18px;
-  box-sizing: border-box;
-}
-
-.room-details {
-  display: flex;
-  align-items: center;
-  gap: 30px;
-  font-size: 16px;
+/* ===== Мини-пинг в правом верхнем углу ===== */
+.room-ping-mini {
+  position: fixed;
+  top: 16px;
+  right: 22px;
+  z-index: 3002;
+  background: rgba(32, 27, 44, 0.95);
+  color: #b896ff;
+  font-size: 13.5px;
   font-family: 'JetBrains Mono', 'Menlo', monospace;
-  color: #d0b8ff;
-  background: #23222f;
-  border-radius: 12px;
-  padding: 7px 18px;
-  box-shadow: 0 2px 10px #a970ff10;
-}
-
-.room-id {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.room-id span {
-  color: #c2b0fa;
-  font-size: 14px;
-}
-#roomIdCode {
-  color: #fff;
-  font-size: 16px;
-  letter-spacing: 0.01em;
-  background: none;
-  border: none;
-}
-#copyRoomId {
-  background: #a970ff22;
-  color: #a970ff;
-  border: none;
-  padding: 5px 13px;
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 14px;
-  font-family: inherit;
-  font-weight: 600;
-  transition: background 0.16s;
-}
-#copyRoomId:hover {
-  background: #a970ff;
-  color: #fff;
-}
-.room-ping {
-  color: #d0b8ff;
-  font-size: 15px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.room-members-section {
-  margin-top: 2px;
-  padding: 10px 18px;
-  background: #211f28;
-  border-radius: 12px;
-  color: #f7f7f8;
-  box-shadow: 0 2px 10px #a970ff08;
-  font-size: 15px;
-  font-family: 'JetBrains Mono', 'Menlo', monospace;
-}
-.room-members-section span {
-  font-weight: 600;
-  color: #a970ff;
-  margin-right: 8px;
-}
-.members-list {
-  list-style: none;
-  margin: 7px 0 0 0;
-  padding: 0;
-}
-.members-list li {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 6px;
-  padding: 0;
-  font-size: 14.5px;
-  letter-spacing: 0.01em;
-}
-.member-name {
-  font-weight: 600;
-  color: #d1cbf5;
-}
-.member-time {
-  font-size: 13px;
-  color: #d0b8ff;
-  padding: 2px 7px;
-  border-radius: 8px;
-  background: #23222f;
-  font-family: inherit;
-  min-width: 48px;
+  padding: 6px 13px;
+  border-radius: 13px;
+  box-shadow: 0 2px 9px #522c8822;
+  min-width: 60px;
   text-align: right;
+  user-select: none;
 }
 
-/* ======= Основной Layout ======= */
-.room-root {
+/* ===== Twitch Layout ===== */
+.twitch-layout {
   width: 100vw;
   min-height: 100vh;
   box-sizing: border-box;
   background: #18181b;
+  padding-top: 56px;
 }
-.room-main {
-  width: 100vw;
-  max-width: 1080px;
-  margin: 0 auto;
+.player-chat-wrap {
   display: flex;
-  flex-direction: row;
-  gap: 28px;
-  align-items: flex-start;
+  width: 100%;
+  min-height: 70vh;
   justify-content: center;
-  box-sizing: border-box;
+  align-items: flex-start;
 }
-
-/* ======= Плеер ======= */
 .player-section {
   flex: 1 1 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 320px;
+  position: relative;
 }
+
+/* ===== Видео ===== */
 .player-wrapper {
   position: relative;
-  width: 100%;
-  max-width: 730px;
+  width: 90vw;
+  max-width: 1080px;
   aspect-ratio: 16/9;
   background: #000;
-  border-radius: 16px;
+  border-radius: 18px;
   overflow: hidden;
   box-shadow: 0 4px 32px #000b, 0 1.5px 8px #2e18535a;
   display: flex;
@@ -182,11 +86,121 @@ html, body {
   width: 100%;
   height: 100%;
   background: #000;
-  border-radius: 16px;
+  border-radius: 18px;
   outline: none;
 }
 
-/* ======= Контролы плеера ======= */
+/* ===== ID комнаты ===== */
+.room-id-badge {
+  margin: 20px 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  padding: 8px 20px;
+  background: #23222f;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px #a970ff10;
+  color: #d0b8ff;
+  font-size: 15.5px;
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-weight: 500;
+  width: 100%;
+  max-width: 360px;
+}
+.room-id-badge small {
+  color: #c2b0fa;
+  font-size: 13px;
+  margin-right: 2px;
+}
+#roomIdCode {
+  color: #fff;
+  font-size: 17px;
+  letter-spacing: 0.03em;
+  margin-right: 5px;
+}
+#copyRoomId {
+  background: #a970ff44;
+  color: #a970ff;
+  border: none;
+  padding: 5px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 600;
+  transition: background 0.16s, color 0.13s;
+}
+#copyRoomId:hover { background: #a970ff; color: #fff; }
+
+/* ===== Секция участников ===== */
+.room-members-section {
+  margin: 17px 0 0 0;
+  padding: 13px 22px 10px 22px;
+  background: #221f29;
+  border-radius: 16px;
+  box-shadow: 0 2px 10px #46218711;
+  width: 100%;
+  max-width: 410px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+.room-members-section > span {
+  color: #bcabff;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 5px;
+  margin-left: 2px;
+  letter-spacing: 0.02em;
+}
+.members-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+.members-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #29214144;
+  gap: 8px;
+  font-size: 15px;
+  font-family: 'Inter', 'JetBrains Mono', 'Menlo', monospace;
+  letter-spacing: 0.01em;
+}
+.members-list li:last-child {
+  border-bottom: none;
+}
+.member-name {
+  color: #efebff;
+  font-weight: 500;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  font-size: 15px;
+}
+.member-time {
+  color: #a970ff;
+  background: #2b2341;
+  border-radius: 7px;
+  padding: 3px 10px 2px 10px;
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 13.3px;
+  font-weight: 600;
+  margin-left: 10px;
+  min-width: 60px;
+  text-align: right;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 4px #a970ff19;
+}
+
+/* ===== Кастомные контроллы ===== */
 .custom-video-controls {
   position: absolute;
   bottom: 0;
@@ -198,34 +212,31 @@ html, body {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 18px;
-  opacity: 0.97;
+  gap: 16px;
+  opacity: 0.96;
 }
 .custom-btn {
   background: none;
   border: none;
-  outline: none;
   color: #f7f7f8;
-  font-size: 22px;
-  padding: 7px 11px;
+  font-size: 21px;
+  padding: 7px 10px;
+  margin: 0 1px;
   border-radius: 50%;
   cursor: pointer;
-  transition: background 0.16s, color 0.18s, box-shadow 0.17s, transform 0.08s;
+  transition: background 0.15s, color 0.2s, box-shadow 0.2s, transform 0.08s;
 }
 .custom-btn:hover, .custom-btn:focus-visible {
-  background: #2d2d36;
+  background: #27272e;
   color: #a970ff;
   box-shadow: 0 1.5px 10px #a970ff30;
 }
-.custom-btn:active {
-  background: #201f2b;
-  transform: scale(0.96);
-}
-#fullscreenBtn {
-  font-size: 19px;
-}
+.custom-btn:active { background: #1e1e26; transform: scale(0.95); }
+#fullscreenBtn { font-size: 19px; }
+.chat-toggle-btn { margin-left: 10px; font-size: 22px; background: #a970ff22; color: #a970ff; }
+.chat-toggle-btn:hover { background: #a970ff33; color: #fff; }
 
-/* ======= Прогресс-бар ======= */
+/* ===== Прогресс-бар ===== */
 .custom-progress-container {
   flex: 1 1 auto;
   height: 7px;
@@ -234,7 +245,7 @@ html, body {
   cursor: pointer;
   position: relative;
   margin: 0 10px;
-  min-width: 90px;
+  min-width: 80px;
   max-width: 420px;
   box-shadow: 0 0.5px 2.5px #000b;
 }
@@ -247,60 +258,52 @@ html, body {
 }
 .custom-time {
   font-family: 'JetBrains Mono', 'Menlo', monospace;
-  font-size: 16px;
+  font-size: 15px;
   color: #c4b6f7;
-  min-width: 52px;
+  min-width: 48px;
   text-align: center;
   user-select: none;
-  letter-spacing: 0.01em;
 }
 
-/* ======= Чат Twitch ======= */
-.chat-section {
-  flex: 0 0 350px;
-  min-width: 290px;
-  max-width: 400px;
-  background: #221f2c;
-  border-radius: 16px;
-  box-shadow: 0 4px 32px #0006, 0 1.5px 8px #2e18533a;
+/* ===== Чат снизу ===== */
+.chat-bottom {
+  width: 100%;
+  max-width: 1080px;
+  margin: 22px auto 0 auto;
+  border-radius: 13px;
+  background: #22202a;
+  box-shadow: 0 4px 24px #0004, 0 2px 12px #a970ff12;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  height: 540px;
-  margin-top: 0;
-  margin-bottom: 0;
-  position: relative;
 }
-.chat-header {
-  padding: 17px 22px 11px 22px;
-  font-size: 20px;
+.chat-header-bottom {
+  background: #23222e;
+  color: #e5e3ff;
   font-weight: 700;
-  color: #c7aaff;
-  border-bottom: 1.5px solid #a970ff22;
-  letter-spacing: 0.01em;
-  background: none;
+  padding: 12px 16px 10px 16px;
+  font-size: 16px;
+  border-bottom: 1.5px solid #a970ff26;
 }
+.chat-bottom .chat-container {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* === Общий чат стиль === */
+.chat-container { flex: 1 1 auto; display: flex; flex-direction: column; height: 100%; }
 .chat-messages {
   flex: 1 1 auto;
+  padding: 13px 14px 4px 13px;
   overflow-y: auto;
-  padding: 16px 18px 6px 18px;
-  background: none;
-  font-size: 15.7px;
+  font-size: 15px;
   color: #f7f7f8;
+  background: none;
   scroll-behavior: smooth;
   word-break: break-word;
-  max-height: 320px;
 }
-.chat-message {
-  margin-bottom: 13px;
-  padding: 3.5px 0;
-  line-height: 1.44;
-}
-.chat-message strong {
-  color: #a970ff;
-  font-weight: 700;
-  margin-right: 7px;
-}
+.chat-message { margin-bottom: 11px; padding: 4.5px 0; }
 .system-message {
   text-align: center;
   color: #b0adc3;
@@ -311,142 +314,43 @@ html, body {
 .chat-input-wrap {
   display: flex;
   align-items: stretch;
-  gap: 0;
-  border-top: 1.5px solid #3e3757;
-  padding: 0;
-  background: #2d293a;
+  border-top: 1px solid #3e3757;
+  background: #241f37;
 }
 .chat-input-wrap input {
   flex: 1;
-  padding: 15px 17px;
+  padding: 12px 14px;
   border: none;
-  border-radius: 0 0 0 11px;
-  background: #181826;
+  background: #191827;
   color: #fff;
-  font-size: 16px;
+  font-size: 15px;
   outline: none;
-  box-shadow: none;
   border-right: 1.5px solid #312466;
-  transition: background 0.15s;
-  font-family: inherit;
+  transition: background 0.18s;
+  border-radius: 0;
 }
-.chat-input-wrap input:focus {
-  background: #23203d;
-}
+.chat-input-wrap input:focus { background: #231f37; }
 .send-btn {
-  padding: 0 26px;
+  padding: 0 21px;
   background: #a970ff;
   color: #fff;
   border: none;
-  border-radius: 0 0 11px 0;
+  border-radius: 0 0 7px 0;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.16s, color 0.16s, box-shadow 0.19s;
-  box-shadow: 0 2px 8px #a970ff13;
-  font-family: inherit;
+  transition: background 0.15s, color 0.16s, box-shadow 0.19s;
+  box-shadow: 0 2px 8px #a970ff15;
 }
-.send-btn:hover {
-  background: #7f4ee3;
-  color: #fff;
-}
-.send-btn:active {
-  background: #5c33b1;
-}
+.send-btn:hover { background: #7f4ee3; color: #fff; }
+.send-btn:active { background: #5c33b1; }
 
-/* ====== Буферизация (спиннер) ====== */
-.buffer-spinner {
-  width: 60px;
-  height: 60px;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 2;
-}
-.buffer-spinner .double-bounce1,
-.buffer-spinner .double-bounce2 {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background-color: #a970ff77;
-  position: absolute;
-  top: 0;
-  left: 0;
-  animation: bounce 2s infinite ease-in-out;
-}
-.buffer-spinner .double-bounce2 {
-  animation-delay: -1s;
-}
-@keyframes bounce {
-  0%, 100% { transform: scale(0); }
-  50%      { transform: scale(1); }
-}
-
-/* ===== Адаптив ===== */
-@media (max-width: 1150px) {
-  .room-main {
-    max-width: 99vw;
-    gap: 14px;
-  }
-  .player-wrapper {
-    max-width: 650px;
-  }
-  .chat-section {
-    min-width: 190px;
-    max-width: 330px;
-    height: 480px;
-  }
-}
-@media (max-width: 900px) {
-  .room-main {
-    flex-direction: column;
-    gap: 26px;
-    align-items: stretch;
-  }
-  .player-section, .chat-section {
-    width: 100vw;
-    max-width: 100vw;
-  }
-  .player-wrapper {
-    width: 99vw;
-    min-width: 220px;
-    max-width: 100vw;
-    margin: 0 auto;
-    border-radius: 13px;
-  }
-  .chat-section {
-    min-width: 0;
-    max-width: 100vw;
-    border-radius: 13px;
-    margin: 0 auto;
-    height: 350px;
-  }
-  .chat-messages { max-height: 170px;}
-}
-@media (max-width: 700px) {
-  .room-info,
-  .room-main {
-    padding: 0 0 0 0 !important;
-    max-width: 100vw;
-  }
-  .player-wrapper, .chat-section {
-    border-radius: 0;
-    box-shadow: none;
-    max-width: 100vw;
-    width: 100vw;
-  }
-  .chat-section { height: 220px;}
-  .chat-messages { max-height: 78px;}
-  .room-details, .room-members-section {
-    border-radius: 0;
-    padding: 9px 6vw;
-  }
-}
-
-/* ===== Скрыть ненужные области на мобиле ===== */
-@media (max-width: 420px) {
-  .chat-header { font-size: 16px;}
-  .chat-messages { font-size: 13.6px;}
-  .room-members-section { font-size: 12px;}
+/* ====== Мобильная адаптация ====== */
+@media (max-width: 950px) {
+  .player-chat-wrap { flex-direction: column; align-items: center; }
+  .player-section { width: 100vw; max-width: none; }
+  .player-wrapper { width: 100vw; max-width: 100vw; border-radius: 0; }
+  .room-id-badge, .room-members-section { max-width: 99vw; border-radius: 11px; padding-left: 6px; padding-right: 6px; }
+  .chat-bottom { max-width: 100vw; border-radius: 0 0 20px 20px; }
+  .room-ping-mini { top: 8px; right: 6px; font-size: 13px; padding: 5px 8px; border-radius: 10px; min-width: 40px; }
 }

@@ -4,37 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.43541.032ё5ё243564364365365370" />
-  <link rel="stylesheet" href="room.css?v=1.32529.25346ё53754142135643634600" />
+  <link rel="stylesheet" href="style.css?v=1.435412214992137979799129992112350.0" />
+  <link rel="stylesheet" href="room.css?v=1.32529992199921327799121121450.0" />
 </head>
 <body>
-  <div class="room-root twitch-layout">
-
-    <!-- Верхний инфо-блок -->
-    <header class="room-info">
-      <a id="backLink" href="index.html" class="back-link">← Назад к описанию</a>
-      <div class="room-details">
-        <div class="room-id">
-          <span>ID комнаты:</span>
-          <code id="roomIdCode"></code>
-          <button id="copyRoomId">Копировать</button>
-        </div>
-        <div class="room-ping">
-          <span>Пинг:</span>
-          <span id="pingValue">-</span> ms
-        </div>
-      </div>
-      <div class="room-members-section">
-        <span>Участники (<span id="membersCount">0</span>):</span>
-        <ul id="membersList" class="members-list">
-          <!-- <li><span class="member-name">User1</span><span class="member-time">1:23:45</span></li> -->
-        </ul>
-      </div>
-    </header>
-
-    <!-- Плеер и чат -->
-    <main class="room-main">
-      <section class="player-section">
+  <div class="room-container twitch-layout">
+    <!-- Пинг в правом верхнем углу -->
+    <div class="room-ping-mini">
+      <span id="pingValue">-</span> ms
+    </div>
+    <a id="backLink" href="index.html" class="back-link">← Назад к описанию</a>
+    <div class="player-chat-wrap">
+      <div class="player-section">
         <div class="player-wrapper" id="playerWrapper">
           <video id="videoPlayer" playsinline></video>
           <div class="custom-video-controls" id="customControls">
@@ -46,28 +27,60 @@
             <span class="custom-time" id="durationLabel">0:00</span>
             <button class="custom-btn" id="muteBtn" title="Звук">🔊</button>
             <button class="custom-btn" id="fullscreenBtn" title="На весь экран">⛶</button>
+            <button class="custom-btn chat-toggle-btn" id="openChatBtn" title="Открыть чат">💬</button>
           </div>
         </div>
-      </section>
-      <aside class="chat-section">
+        <!-- ID комнаты по центру под плеером -->
+        <div class="room-id-center">
+          <small>ID комнаты:</small>
+          <code id="roomIdCode"></code>
+          <button id="copyRoomId">Копировать</button>
+        </div>
+        <!-- Секция участников под ID комнаты -->
+        <div class="room-members-section">
+          <span>Участники:</span>
+          <ul id="membersList" class="members-list">
+            <!-- <li><span class="member-name">User1</span><span class="member-time">1:23:45</span></li> -->
+          </ul>
+        </div>
+        <!-- ===== Чат всегда снизу ===== -->
+        <div class="chat-bottom" id="chatBottom">
+          <div class="chat-header chat-header-bottom">
+            <span>Чат комнаты</span>
+          </div>
+          <div class="chat-container">
+            <div id="messages" class="chat-messages"></div>
+            <div class="chat-input-wrap">
+              <input id="msgInput" placeholder="Введите сообщение…" autocomplete="off" />
+              <button id="sendBtn" class="send-btn">Отправить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- ===== SIDEBAR CHAT (Twitch-like) ===== -->
+      <aside class="chat-sidebar" id="chatSidebar">
         <div class="chat-header">
           <span>Чат комнаты</span>
+          <button class="custom-btn chat-close-btn" id="closeChatBtn" title="Закрыть чат">✖</button>
         </div>
-        <div class="chat-messages" id="messages"></div>
-        <form class="chat-input-wrap" onsubmit="return false;">
-          <input id="msgInput" placeholder="Введите сообщение…" autocomplete="off" />
-          <button id="sendBtn" class="send-btn">Отправить</button>
-        </form>
+        <div class="chat-container">
+          <div id="messagesSidebar" class="chat-messages"></div>
+          <div class="chat-input-wrap">
+            <input id="msgInputSidebar" placeholder="Введите сообщение…" autocomplete="off" />
+            <button id="sendBtnSidebar" class="send-btn">Отправить</button>
+          </div>
+          <div id="membersListSidebar" class="chat-members"></div>
+        </div>
       </aside>
-    </main>
+    </div>
   </div>
 
   <!-- Скрипты -->
-  <script src="https://telegram.org/js/telegram-web-app.js?v=1.0.1"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest?v=1.0.1"></script>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.1"></script>
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js?v=1.0.1"></script>
-  <script src="data.js?v=1.0.443764575687967451"></script>
-  <script src="room.js?v=1.0.21312413252345436576547546856791"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="data.js?v=1.0.4213321212397797119992240"></script>
+  <script src="room.js?v=1.0.3240122212137979132999991123213"></script>
 </body>
 </html>
