@@ -112,17 +112,15 @@ function logOnce(msg) {
 }
 function log(msg) { console.log(msg); }
 
-// --- Пинг и СТАТИСТИКА (отправлять каждую секунду!) ---
-// Измеряем пинг по своей инициативе и отправляем ВСЕМ, вместе с временем плеера
-function measureAndSendStats() {
+// --- Пинг и время для всех участников (ТОЛЬКО ЭТО ДОБАВЛЕНО!) ---
+function measurePingAndSend() {
   if (!player || !myUserId) return;
   const t0 = Date.now();
-  socket.emit('ping_measure');
-  socket.once('pong_measure', () => {
+  socket.emit('ping');
+  socket.once('pong', () => {
     const myPing = Date.now() - t0;
     userPingMap[myUserId] = myPing;
     userTimeMap[myUserId] = player.currentTime;
-    // ОТПРАВИТЬ ВСЕМ своё время и пинг
     socket.emit('update_time', {
       roomId,
       user_id: myUserId,
@@ -131,16 +129,12 @@ function measureAndSendStats() {
     });
   });
 }
-// Каждую секунду отправляем актуальные данные всем (только эту функцию, всё!)
-setInterval(measureAndSendStats, 1000);
+setInterval(measurePingAndSend, 1000);
 
-// Получаем данные от других пользователей
-socket.on('room_stats_update', data => {
-  if (data && data.users) {
-    Object.entries(data.users).forEach(([id, { currentTime, ping }]) => {
-      userTimeMap[id] = currentTime;
-      userPingMap[id] = ping;
-    });
+socket.on('user_time_update', data => {
+  if (data && data.user_id) {
+    userTimeMap[data.user_id] = data.currentTime;
+    userPingMap[data.user_id] = data.ping;
     updateMembersList();
   }
 });
