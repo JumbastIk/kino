@@ -135,10 +135,12 @@ function measureAndSendStats() {
 setInterval(measureAndSendStats, 1000);
 
 // Получаем данные от других пользователей
-socket.on('user_time_update', data => {
-  if (data && data.user_id) {
-    userTimeMap[data.user_id] = data.currentTime;
-    userPingMap[data.user_id] = data.ping;
+socket.on('room_stats_update', data => {
+  if (data && data.users) {
+    Object.entries(data.users).forEach(([id, { currentTime, ping }]) => {
+      userTimeMap[id] = currentTime;
+      userPingMap[id] = ping;
+    });
     updateMembersList();
   }
 });
