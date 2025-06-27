@@ -31,19 +31,25 @@ const membersList = document.getElementById('membersList');
 const msgInput = document.getElementById('msgInput');
 const sendBtn = document.getElementById('sendBtn');
 const backLink = document.getElementById('backLink');
-const roomIdBadge = document.getElementById('roomIdBadge');
 const roomIdCode = document.getElementById('roomIdCode');
 const copyRoomId = document.getElementById('copyRoomId');
-// sidebar chat
-const messagesSidebar = document.getElementById('messagesSidebar');
-const membersListSidebar = document.getElementById('membersListSidebar');
-const msgInputSidebar = document.getElementById('msgInputSidebar');
-const sendBtnSidebar = document.getElementById('sendBtnSidebar');
+
+// Верно показываем id комнаты сразу при загрузке
+if (roomIdCode) roomIdCode.textContent = roomId;
+if (copyRoomId) copyRoomId.onclick = () => {
+  navigator.clipboard.writeText(roomId);
+  alert('Скопировано!');
+};
 
 let player = video, spinner, lastPing = 0, myUserId = null;
 let metadataReady = false, lastSyncLog = 0;
 let ignoreSyncEvent = false, lastSyncApply = 0, syncProblemDetected = false, syncErrorTimeout = null;
 let readyForControl = false;
+
+// ===== СТРУКТУРЫ для каждого участника =====
+let allMembers = [];
+let userTimeMap = {};
+let userPingMap = {};
 
 // Контролы неактивны до sync
 disableControls();
@@ -72,41 +78,13 @@ function disableControls() {
   progressContainer.style.opacity = '.6';
 }
 
-// --- Логика Twitch-чата (нижний всегда, sidebar поверх) ---
-// Кнопка чата открывает sidebar, нижний чат всегда открыт!
-openChatBtn.addEventListener('click', () => {
-  chatSidebar.classList.add('open');
-  syncSidebarWithBottom();
-  setTimeout(()=>msgInputSidebar && msgInputSidebar.focus(),100);
-});
-closeChatBtn.addEventListener('click', () => {
-  chatSidebar.classList.remove('open');
-});
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') chatSidebar.classList.remove('open');
-});
-
-// Синхронизировать сообщения/участников между чатами
-function syncSidebarWithBottom() {
-  if(messagesSidebar && messagesBox) messagesSidebar.innerHTML = messagesBox.innerHTML;
-  if(membersListSidebar && membersList) membersListSidebar.innerHTML = membersList.innerHTML;
-}
-
-// Сообщения дублируются и в нижний, и в боковой чат!
+// --- ЧАТ (упрощён, без сайдбара!) ---
 function appendMessage(author, text) {
   const d1 = document.createElement('div');
   d1.className = 'chat-message';
   d1.innerHTML = `<strong>${author}:</strong> ${text}`;
   messagesBox.appendChild(d1);
   messagesBox.scrollTop = messagesBox.scrollHeight;
-  // sidebar
-  if(messagesSidebar){
-    const d2 = document.createElement('div');
-    d2.className = 'chat-message';
-    d2.innerHTML = `<strong>${author}:</strong> ${text}`;
-    messagesSidebar.appendChild(d2);
-    messagesSidebar.scrollTop = messagesSidebar.scrollHeight;
-  }
 }
 function appendSystemMessage(text) {
   const d1 = document.createElement('div');
@@ -114,36 +92,17 @@ function appendSystemMessage(text) {
   d1.innerHTML = `<em>${text}</em>`;
   messagesBox.appendChild(d1);
   messagesBox.scrollTop = messagesBox.scrollHeight;
-  // sidebar
-  if(messagesSidebar){
-    const d2 = document.createElement('div');
-    d2.className = 'chat-message system-message';
-    d2.innerHTML = `<em>${text}</em>`;
-    messagesSidebar.appendChild(d2);
-    messagesSidebar.scrollTop = messagesSidebar.scrollHeight;
-  }
 }
-
-// Отправка сообщений
 sendBtn.addEventListener('click', sendMessage);
 msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
-if (sendBtnSidebar) sendBtnSidebar.addEventListener('click', sendMessageSidebar);
-if (msgInputSidebar) msgInputSidebar.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessageSidebar(); });
-
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
   socket.emit('chat_message', { roomId, author: 'Гость', text: t });
   msgInput.value = '';
 }
-function sendMessageSidebar() {
-  const t = msgInputSidebar.value.trim();
-  if (!t) return;
-  socket.emit('chat_message', { roomId, author: 'Гость', text: t });
-  msgInputSidebar.value = '';
-}
 
-// --- Логгер (throttle) ---
+// --- Логгер ---
 function logOnce(msg) {
   const now = Date.now();
   if (now - lastSyncLog > 600) {
@@ -159,7 +118,12 @@ function measurePing() {
   socket.emit('ping');
   socket.once('pong', () => {
     lastPing = Date.now() - t0;
-    logOnce(`[PING] ${lastPing} ms`);
+    const myPing = lastPing;
+    // сохраняем пинг текущего пользователя
+    if (myUserId) userPingMap[myUserId] = myPing;
+    document.getElementById('pingValue').textContent = myPing;
+    logOnce(`[PING] ${myPing} ms`);
+    updateMembersList();
   });
 }
 setInterval(measurePing, 10000);
@@ -177,14 +141,11 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 socket.on('members', ms => {
-  membersList.innerHTML =
-    `<div class="chat-members-label">Участники (${ms.length}):</div>` +
-    `<ul>${ms.map(m => `<li>${m.user_id || m.id}</li>`).join('')}</ul>`;
-  if(membersListSidebar) membersListSidebar.innerHTML = membersList.innerHTML;
+  allMembers = ms;
+  updateMembersList();
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
-  if(messagesSidebar) messagesSidebar.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => {
@@ -193,6 +154,43 @@ socket.on('chat_message', m => {
 socket.on('system_message', msg => {
   if (msg?.text) appendSystemMessage(msg.text);
 });
+
+// ===== СИНХРОНИЗАЦИЯ ВРЕМЕНИ участников =====
+// Каждый участник сообщает своё время плеера
+setInterval(() => {
+  if (!player || !myUserId) return;
+  userTimeMap[myUserId] = player.currentTime;
+  socket.emit('update_time', { roomId, user_id: myUserId, currentTime: player.currentTime });
+  // свой пинг — уже есть в userPingMap[myUserId]
+}, 1000);
+
+// Получаем время и пинг от других
+socket.on('user_time_update', data => {
+  if (data && data.user_id) {
+    userTimeMap[data.user_id] = data.currentTime;
+    if (typeof data.ping === 'number') userPingMap[data.user_id] = data.ping;
+    updateMembersList();
+  }
+});
+
+// ФУНКЦИЯ: вывести участников и их время
+function updateMembersList() {
+  if (!Array.isArray(allMembers)) return;
+  membersList.innerHTML =
+    allMembers
+      .map(m => {
+        const userId = m.user_id || m.id || '';
+        const displayName = m.first_name || userId;
+        const curTime = userTimeMap[userId] ?? 0;
+        const ping = userPingMap[userId] ?? '-';
+        return `<li>
+          <span class="member-name">${displayName}</span>
+          <span class="member-time" style="margin-left:8px;font-family:monospace">${formatTime(curTime)}</span>
+          <span class="member-ping" style="margin-left:7px;font-size:12px;color:#a970ff;">${ping}ms</span>
+        </li>`;
+      })
+      .join('');
+}
 
 // --- СИНХРОНИЗАЦИЯ --- //
 function applySyncState(data) {
@@ -264,14 +262,6 @@ async function fetchRoom() {
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
-    // Room ID badge
-    if (roomIdBadge && roomIdCode && copyRoomId) {
-      roomIdCode.textContent = roomId;
-      copyRoomId.onclick = () => {
-        navigator.clipboard.writeText(roomId);
-        alert('Скопировано!');
-      };
-    }
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);

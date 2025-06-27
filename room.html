@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.435412214992137979799129992112350.0" />
-  <link rel="stylesheet" href="room.css?v=1.32529992199921327799121121450.0" />
+  <link rel="stylesheet" href="style.css?v=1.4354122149921231352137979799129992112350.0" />
+  <link rel="stylesheet" href="room.css?v=1.32529992199923421327799121121450.0" />
 </head>
 <body>
   <div class="room-container twitch-layout">
@@ -40,10 +40,10 @@
         <div class="room-members-section">
           <span>Участники:</span>
           <ul id="membersList" class="members-list">
-            <!-- <li><span class="member-name">User1</span><span class="member-time">1:23:45</span></li> -->
+            <!-- js: <li><span class="member-name">User1</span><span class="member-time">1:23:45</span></li> -->
           </ul>
         </div>
-        <!-- ===== Чат всегда снизу ===== -->
+        <!-- ===== Чат ===== -->
         <div class="chat-bottom" id="chatBottom">
           <div class="chat-header chat-header-bottom">
             <span>Чат комнаты</span>
@@ -57,21 +57,6 @@
           </div>
         </div>
       </div>
-      <!-- ===== SIDEBAR CHAT (Twitch-like) ===== -->
-      <aside class="chat-sidebar" id="chatSidebar">
-        <div class="chat-header">
-          <span>Чат комнаты</span>
-          <button class="custom-btn chat-close-btn" id="closeChatBtn" title="Закрыть чат">✖</button>
-        </div>
-        <div class="chat-container">
-          <div id="messagesSidebar" class="chat-messages"></div>
-          <div class="chat-input-wrap">
-            <input id="msgInputSidebar" placeholder="Введите сообщение…" autocomplete="off" />
-            <button id="sendBtnSidebar" class="send-btn">Отправить</button>
-          </div>
-          <div id="membersListSidebar" class="chat-members"></div>
-        </div>
-      </aside>
     </div>
   </div>
 
@@ -80,7 +65,7 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script src="data.js?v=1.0.4213321212397797119992240"></script>
-  <script src="room.js?v=1.0.3240122212137979132999991123213"></script>
+  <script src="data.js?v=1.0.4213321212397797346346436119992240"></script>
+  <script src="room.js?v=1.0.324012221213797912542353465436132999991123213"></script>
 </body>
 </html>
