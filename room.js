@@ -34,7 +34,6 @@ let wasPausedBeforeSeek = false;
 let ignoreNextEvent = false;
 let lastSent = { time: 0, position: 0, paused: null };
 
-// --- ПИНГ для компенсации лага --- //
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -64,7 +63,6 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 
-// --- Чат и участники --- //
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
@@ -86,9 +84,8 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// --- СИНХРОНИЗАЦИЯ (только через sync_state от сервера!) --- //
+// --- СИНХРОНИЗАЦИЯ (Только через sync_state) --- //
 socket.on('sync_state', d => scheduleSync(d, 'sync_state'));
-socket.on('player_update', d => scheduleSync(d, 'player_update')); // (если сервер поддерживает)
 
 function scheduleSync(d, source) {
   if (!metadataReady) {
@@ -102,7 +99,6 @@ function scheduleSync(d, source) {
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
   if (!player || !metadataReady) return;
 
-  // --- пропустить sync сразу после seek локально ---
   if (localSeek) {
     player.currentTime = pos;
     logOnce(`⏸ doSync SKIP (localSeek) setTime=${pos.toFixed(2)}`);
@@ -117,12 +113,14 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, sou
   const delta = targetTime - player.currentTime;
   const abs = Math.abs(delta);
 
-  if (abs > 1.3) {
+  // HARD JUMP if abs > 1s
+  if (abs > 1.0) {
     player.currentTime = targetTime;
     logOnce(`✔ doSync [${source}] → JUMP: ${targetTime.toFixed(2)} (cur: ${player.currentTime.toFixed(2)})`);
   }
-  else if (!isPaused && abs > 0.09) {
-    let corr = Math.max(-0.08, Math.min(0.08, delta * 0.45));
+  // Soft playbackRate adjust
+  else if (!isPaused && abs > 0.05) {
+    let corr = Math.max(-0.07, Math.min(0.07, delta * 0.42));
     player.playbackRate = 1 + corr;
     logOnce(`✔ doSync [${source}] → RATE: ${player.playbackRate.toFixed(3)} (delta ${delta.toFixed(3)})`);
   } else {
@@ -163,7 +161,6 @@ async function fetchRoom() {
     wrap.appendChild(spinner);
     playerWrapper.appendChild(wrap);
 
-    // --- Room badge (ID) ---
     const badge = document.createElement('div');
     badge.className = 'room-id-badge';
     badge.innerHTML = `
@@ -196,7 +193,7 @@ async function fetchRoom() {
       if (initialSync) doSync(initialSync, 'init');
     });
 
-    // --- ТОЛЬКО отправка событий на сервер ---
+    // --- События отправлять только на сервер --- //
     v.addEventListener('seeking', () => {
       if (!ignoreNextEvent) {
         localSeek = true;
@@ -226,7 +223,7 @@ async function fetchRoom() {
   }
 }
 
-// --- Emit только реальных действий пользователя ---
+// --- Emit только реальных действий пользователя --- //
 function emitAction(paused) {
   if (!player) return;
   const now = Date.now();
@@ -234,7 +231,7 @@ function emitAction(paused) {
 
   if (
     now - lastSent.time < 200 &&
-    Math.abs(position - lastSent.position) < 0.25 &&
+    Math.abs(position - lastSent.position) < 0.22 &&
     paused === lastSent.paused
   ) {
     if (now - (lastSent.skipLog || 0) > 2000) {
@@ -253,7 +250,7 @@ function emitAction(paused) {
   lastSent = { time: now, position, paused };
 }
 
-// --- UI ---
+// --- UI --- //
 function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
