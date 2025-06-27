@@ -19,9 +19,8 @@ const membersList   = document.getElementById('membersList');
 const msgInput      = document.getElementById('msgInput');
 const sendBtn       = document.getElementById('sendBtn');
 
-let player, spinner, lastPing = 0, myUserId = null, initialSync = null, syncTimeout = null;
-let metadataReady = false, lastSyncLog = 0, localSeek = false, wasPausedBeforeSeek = false;
-let ignoreNextEvent = false, lastSent = { time: 0, position: 0, paused: null };
+let player, spinner, lastPing = 0, myUserId = null, initialSync = null;
+let metadataReady = false, lastSyncLog = 0;
 
 // Логгер (throttle)
 function logOnce(msg) {
@@ -90,73 +89,54 @@ function sendMessage() {
 }
 
 // --- СИНХРОНИЗАЦИЯ --- //
-socket.on('sync_state', d => {
-  logOnce(`[sync_state] ← ${JSON.stringify(d)}`);
-  scheduleSync(d, 'sync_state');
-});
+let ignoreSyncEvent = false;
 
-function scheduleSync(d, source) {
-  if (!metadataReady) {
-    initialSync = d;
-    logOnce(`[scheduleSync][${source}] metadataReady=0 (отложено)`);
-    return;
-  }
-  clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(d, source), 100);
-}
-
-function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
-  if (!player || !metadataReady) {
-    log(`[doSync][${source}] !player || !metadataReady`);
-    return;
-  }
-
-  log(`[doSync][${source}] sync: pos=${pos} paused=${isPaused} updatedAt=${serverTs} localSeek=${localSeek} playerTime=${player.currentTime} playerPaused=${player.paused}`);
-
-  if (localSeek) {
-    player.currentTime = pos;
-    logOnce(`⏸ doSync [${source}] SKIP (localSeek) setTime=${pos.toFixed(2)}`);
-    localSeek = false;
-    return;
-  }
+socket.on('sync_state', data => {
+  // Новое состояние с сервера — корректируем видео
+  if (!metadataReady || !player) return;
 
   const now = Date.now();
-  const rtt = lastPing || 0;
-  const drift = ((now - serverTs) / 1000) - (rtt / 2000);
-  const targetTime = isPaused ? pos : pos + drift;
-  const delta = targetTime - player.currentTime;
-  const abs = Math.abs(delta);
+  const timeSinceUpdate = (now - data.updatedAt) / 1000;
+  const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
 
-  // JUMP > 1.0s
-  if (abs > 1.0) {
-    logOnce(`✔ doSync [${source}] → JUMP: ${targetTime.toFixed(2)} (cur: ${player.currentTime.toFixed(2)})`);
-    player.currentTime = targetTime;
-  }
-  // Smooth playbackRate
-  else if (!isPaused && abs > 0.05) {
-    let corr = Math.max(-0.07, Math.min(0.07, delta * 0.42));
-    player.playbackRate = 1 + corr;
-    logOnce(`✔ doSync [${source}] → RATE: ${player.playbackRate.toFixed(3)} (delta ${delta.toFixed(3)})`);
-  } else {
-    player.playbackRate = 1;
+  // Только если рассинхрон >0.5s — прыгнем
+  if (Math.abs(player.currentTime - target) > 0.5) {
+    ignoreSyncEvent = true;
+    player.currentTime = target;
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
+    logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
 
-  ignoreNextEvent = true;
-
-  log(`[doSync][${source}] apply pause/play: isPaused=${isPaused} playerPaused=${player.paused}`);
-
-  if (isPaused && !player.paused) {
+  // Корректируем play/pause если отличается
+  if (data.is_paused && !player.paused) {
+    ignoreSyncEvent = true;
     player.pause();
-    logOnce(`✔ doSync [${source}] → PAUSE`);
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
+    logOnce('[SYNC] pause');
   }
-  else if (!isPaused && player.paused) {
-    player.play().then(() => logOnce(`✔ doSync [${source}] → PLAY`)).catch(() => {});
+  if (!data.is_paused && player.paused) {
+    ignoreSyncEvent = true;
+    player.play().then(() => {
+      setTimeout(() => { ignoreSyncEvent = false; }, 150);
+      logOnce('[SYNC] play');
+    }).catch(()=>{ ignoreSyncEvent = false; });
   }
+});
 
-  setTimeout(() => {
-    player.playbackRate = 1;
-    ignoreNextEvent = false;
-  }, 250);
+function emitSyncState() {
+  if (!player) return;
+  socket.emit('player_action', {
+    roomId,
+    position: player.currentTime,
+    is_paused: player.paused
+  });
+  logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
+}
+
+function setupSyncHandlers(v) {
+  v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
 }
 
 // --- Видео-плеер + UI --- //
@@ -207,49 +187,10 @@ async function fetchRoom() {
 
     v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
-      if (initialSync) doSync(initialSync, 'init');
+      setupSyncHandlers(v);
+      player = v;
+      if (initialSync) socket.emit('request_state', { roomId }); // Попросить состояние ещё раз если нужно
       logOnce('[player] loadedmetadata');
-    });
-
-    // Только действия пользователя:
-    v.addEventListener('seeking', () => {
-      if (!ignoreNextEvent) {
-        localSeek = true;
-        wasPausedBeforeSeek = v.paused;
-        logOnce('[player] seeking');
-      }
-    });
-
-    // Фикс перемотки и sync
-    v.addEventListener('seeked', () => {
-      if (!ignoreNextEvent) {
-        setTimeout(() => {
-          if (!wasPausedBeforeSeek) {
-            v.play();
-            logOnce('[player] seeked: auto play after seek');
-          } else if (wasPausedBeforeSeek && !v.paused) {
-            v.pause();
-            logOnce('[player] seeked: back to pause after seek');
-          }
-        }, 0);
-
-        emitAction(false); // всегда is_paused: false после seeked
-        logOnce('[player] seeked emitAction (force play)');
-      }
-      wasPausedBeforeSeek = false;
-    });
-
-    v.addEventListener('play', () => {
-      if (!ignoreNextEvent && !localSeek) {
-        emitAction(false);
-        logOnce('[player] play emitAction');
-      }
-    });
-    v.addEventListener('pause', () => {
-      if (!ignoreNextEvent && !localSeek) {
-        emitAction(true);
-        logOnce('[player] pause emitAction');
-      }
     });
 
     player = v;
@@ -258,35 +199,6 @@ async function fetchRoom() {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
-}
-
-// --- Emit только пользовательских действий --- //
-function emitAction(paused) {
-  if (!player) return;
-  const now = Date.now();
-  const position = player.currentTime;
-
-  log(`[emitAction] OUT: is_paused=${paused} @${position.toFixed(3)} time=${now}`);
-
-  if (
-    now - lastSent.time < 200 &&
-    Math.abs(position - lastSent.position) < 0.22 &&
-    paused === lastSent.paused
-  ) {
-    if (now - (lastSent.skipLog || 0) > 1200) {
-      logOnce('⏳ emitAction SKIP: no changes');
-      lastSent.skipLog = now;
-    }
-    return;
-  }
-  socket.emit('player_action', {
-    roomId,
-    position,
-    is_paused: paused,
-    speed: player.playbackRate
-  });
-  lastSent = { time: now, position, paused };
-  logOnce(`[emitAction] ${paused ? 'pause' : 'play'} @${position.toFixed(3)}`);
 }
 
 // --- UI --- //
