@@ -4,10 +4,12 @@ const roomsState      = {};
 const broadcastTimers = {};
 const BROADCAST_INTERVAL = 2000;
 
-// Функция для более точного расчета текущей позиции
+// Вычисляем актуальную позицию
 function calculatePosition(roomId) {
   const s = roomsState[roomId];
-  if (!s) return { position: 0, is_paused: true, speed: 1, updatedAt: Date.now() };
+  if (!s) {
+    return { position: 0, is_paused: true, speed: 1, updatedAt: Date.now() };
+  }
 
   const now = Date.now();
   const elapsed = (now - s.updatedAt) / 1000;
@@ -21,7 +23,7 @@ function calculatePosition(roomId) {
   };
 }
 
-// Планирование регулярной рассылки состояния
+// Запускаем регулярную рассылку sync_state
 function scheduleBroadcast(io, roomId) {
   if (broadcastTimers[roomId]) return;
 
@@ -34,60 +36,66 @@ function scheduleBroadcast(io, roomId) {
   console.log(`[Schedule] Started broadcast timer for room ${roomId}`);
 }
 
-// Остановка рассылки и очистка состояния, если комната пуста
+// Очищаем, если никого нет
 function clearBroadcast(io, roomId) {
   const room = io.sockets.adapter.rooms.get(roomId);
   if (!room || room.size === 0) {
     clearInterval(broadcastTimers[roomId]);
     delete broadcastTimers[roomId];
     delete roomsState[roomId];
-    console.log(`[Clear] Stopped broadcast timer and cleared state for room ${roomId}`);
+    console.log(`[Clear] Stopped broadcast and cleared state for room ${roomId}`);
   }
 }
 
 module.exports = function(io) {
   io.on('connection', socket => {
     let currentRoom = null;
-    let userId      = null;
+    let userId = null;
 
-    // Пользователь подключился к комнате
     socket.on('join', async ({ roomId, userData }) => {
       try {
         currentRoom = roomId;
-        userId      = userData.id;
+        userId = userData.id;
         socket.join(roomId);
         console.log(`[Join] User ${userId} joined room ${roomId}`);
 
-        // Обновляем участников
         await supabase.from('room_members').upsert(
           { room_id: roomId, user_id: userId },
           { onConflict: ['room_id', 'user_id'] }
         );
 
-        const { data: members } = await supabase.from('room_members').select('user_id').eq('room_id', roomId);
+        const { data: members } = await supabase
+          .from('room_members')
+          .select('user_id')
+          .eq('room_id', roomId);
+
         io.to(roomId).emit('members', members);
 
-        // Системное сообщение
         io.to(roomId).emit('system_message', {
           text: 'Пользователь вошёл в комнату',
           created_at: new Date().toISOString()
         });
 
-        // История сообщений
         const { data: messages } = await supabase
           .from('messages')
           .select('author, text, created_at')
           .eq('room_id', roomId)
           .order('created_at', { ascending: true });
+
         socket.emit('history', messages);
 
         // Инициализация состояния
         if (!roomsState[roomId]) {
-          roomsState[roomId] = { time: 0, playing: false, speed: 1, updatedAt: Date.now() };
+          roomsState[roomId] = {
+            time: 0,
+            playing: false,
+            speed: 1,
+            updatedAt: Date.now()
+          };
           console.log(`[Init] Initialized state for room ${roomId}`);
         }
 
-        // Отправка текущего состояния пользователю
+        // Отправка начального состояния
         socket.emit('sync_state', calculatePosition(roomId));
 
         clearBroadcast(io, roomId);
@@ -98,18 +106,16 @@ module.exports = function(io) {
       }
     });
 
-    // Запрос текущего состояния вручную
     socket.on('request_state', ({ roomId }) => {
       console.log(`[Request State] for room ${roomId}`);
       socket.emit('sync_state', calculatePosition(roomId));
     });
 
-    // Пинг-понг для измерения RTT
     socket.on('ping', () => {
       socket.emit('pong');
     });
 
-    // Действия пользователя с плеером
+    // Обновление состояния от клиента — без рассылки другим
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       try {
         if (typeof position !== 'number' || position < 0) return;
@@ -122,52 +128,51 @@ module.exports = function(io) {
           updatedAt: now
         };
 
-        const updateData = {
-          position,
-          is_paused,
-          speed: speed || 1,
-          updatedAt: now
-        };
-
-        io.to(roomId).emit('player_update', updateData);
-        console.log(`[Player Action] in room ${roomId}`, updateData);
+        console.log(`[Player Action] updated state for room ${roomId}`, roomsState[roomId]);
 
         clearBroadcast(io, roomId);
         scheduleBroadcast(io, roomId);
+
       } catch (err) {
         console.error('[Player Action Error]', err.message);
       }
     });
 
-    // Чат
     socket.on('chat_message', async msg => {
       try {
         await supabase.from('messages').insert([{
           room_id: msg.roomId,
-          author:  msg.author,
-          text:    msg.text
+          author: msg.author,
+          text: msg.text
         }]);
 
         const chatMsg = {
-          author:     msg.author,
-          text:       msg.text,
+          author: msg.author,
+          text: msg.text,
           created_at: new Date().toISOString()
         };
+
         io.to(msg.roomId).emit('chat_message', chatMsg);
         console.log(`[Chat Message] in room ${msg.roomId}`, chatMsg);
+
       } catch (err) {
         console.error('[Chat Error]', err.message);
       }
     });
 
-    // Пользователь отключился
     socket.on('disconnect', async () => {
       try {
         if (!currentRoom || !userId) return;
 
-        await supabase.from('room_members').delete().match({ room_id: currentRoom, user_id: userId });
+        await supabase.from('room_members')
+          .delete()
+          .match({ room_id: currentRoom, user_id: userId });
 
-        const { data: members } = await supabase.from('room_members').select('user_id').eq('room_id', currentRoom);
+        const { data: members } = await supabase
+          .from('room_members')
+          .select('user_id')
+          .eq('room_id', currentRoom);
+
         io.to(currentRoom).emit('members', members);
 
         io.to(currentRoom).emit('system_message', {
