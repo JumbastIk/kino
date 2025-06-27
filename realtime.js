@@ -7,7 +7,7 @@ const roomsState      = {};
 // Broadcast timers per room
 const broadcastTimers = {};
 // Interval for background sync (ms)
-const BROADCAST_INTERVAL = 2000;
+const BROADCAST_INTERVAL = 500;  // было 2000, стало 500
 
 // Start periodic broadcast of predicted state for a room
 function scheduleBroadcast(io, roomId) {
@@ -53,15 +53,13 @@ module.exports = function(io) {
         userId      = userData.id;
         socket.join(roomId);
 
-        // Update members table
+        // Update members in supabase…
         await supabase
           .from('room_members')
           .upsert(
             { room_id: roomId, user_id: userId },
             { onConflict: ['room_id','user_id'] }
           );
-
-        // Broadcast updated members list
         const { data: members } = await supabase
           .from('room_members')
           .select('user_id')
@@ -82,7 +80,7 @@ module.exports = function(io) {
           .order('created_at', { ascending: true });
         socket.emit('history', messages);
 
-        // Initialize room state if first
+        // Initialize room state if first user
         if (!roomsState[roomId]) {
           roomsState[roomId] = {
             time:      0,
@@ -92,7 +90,7 @@ module.exports = function(io) {
           };
         }
 
-        // Immediately send current state
+        // Immediately send current state (sync_state)
         const s = roomsState[roomId];
         socket.emit('sync_state', {
           position:  s.time,
@@ -101,7 +99,7 @@ module.exports = function(io) {
           updatedAt: s.updatedAt
         });
 
-        // (Re)start background broadcast
+        // (Re)start periodic broadcast
         clearBroadcast(io, roomId);
         scheduleBroadcast(io, roomId);
 
@@ -110,7 +108,13 @@ module.exports = function(io) {
       }
     });
 
+    // ===== Ping-pong for RTT =====
+    socket.on('ping', () => {
+      socket.emit('pong');
+    });
+
     // ===== On explicit state request =====
+    // (клиент уже не должен дергать, но оставим на всякий)
     socket.on('request_state', ({ roomId }) => {
       const s = roomsState[roomId] || {
         time:      0,
@@ -126,32 +130,27 @@ module.exports = function(io) {
       });
     });
 
-    // ===== Ping-pong for RTT =====
-    socket.on('ping', () => {
-      socket.emit('pong');
-    });
-
     // ===== Handle play/pause/seek =====
-    socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
+    socket.on('player_action', ({ roomId, pos, is_paused, speed }) => {
       const now = Date.now();
 
       // Update authoritative state
       roomsState[roomId] = {
-        time:      position,
+        time:      pos,
         playing:   !is_paused,
         speed:     speed || 1,
         updatedAt: now
       };
 
-      // Immediately broadcast to all
-      io.to(roomId).emit('player_update', {
-        position,
+      // Сразу шлём единообразный sync_state:
+      io.to(roomId).emit('sync_state', {
+        position:  pos,
         is_paused,
         speed:     speed || 1,
         updatedAt: now
       });
 
-      // Reset background broadcast timer
+      // Перезапуск broadcast
       clearBroadcast(io, roomId);
       scheduleBroadcast(io, roomId);
     });
