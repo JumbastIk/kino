@@ -88,35 +88,30 @@ function sendMessage() {
   logOnce(`[chat][me]: ${t}`);
 }
 
-// --- СИНХРОНИЗАЦИЯ --- //
+// --- НАДЁЖНАЯ СИНХРОНИЗАЦИЯ --- //
 let ignoreSyncEvent = false;
 let syncInProgress = false;
+let justSeeked = false; // Новый флаг
 
 // "План Б" для авто-восстановления sync-зацикливания
 let syncHistory = [];
 let syncBlockUntil = 0;
 const SYNC_LOOP_WINDOW = 1000; // 1 секунда
 const SYNC_LOOP_THRESHOLD = 5; // сколько событий в окне считать за "зацикливание"
-const SYNC_BLOCK_MS = 1500; // время, на которое "глушим" sync (без событий)
+const SYNC_BLOCK_MS = 1200; // время блокировки sync после "Плана Б"
 
-// Основной sync обработчик
 socket.on('sync_state', data => {
   if (!metadataReady || !player) return;
   if (Date.now() < syncBlockUntil) return;
-
-  // Если уже идет sync - не реагируем
   if (syncInProgress) return;
 
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
 
-  // Зафиксируем событие для "Плана Б"
+  // Сохраняем последние sync
   syncHistory.push(now);
-  // Оставляем только события за последнее окно
   syncHistory = syncHistory.filter(t => now - t < SYNC_LOOP_WINDOW);
-
-  // Если слишком часто идут sync — считаем что цикл/зацикливание!
   if (syncHistory.length > SYNC_LOOP_THRESHOLD) {
     logOnce('[SYNC][ПланБ] Detected loop, force-recover');
     syncBlockUntil = now + SYNC_BLOCK_MS;
@@ -125,19 +120,31 @@ socket.on('sync_state', data => {
     return;
   }
 
-  // Только если рассинхрон >0.4s — прыгнем
+  // --- Точечная синхронизация времени ---
+  // Только если рассинхрон >0.4s — прыгаем (но не ставим на паузу если playing!)
   if (Math.abs(player.currentTime - target) > 0.4) {
     ignoreSyncEvent = true;
     syncInProgress = true;
+    justSeeked = true;
     player.currentTime = target;
     setTimeout(() => {
       ignoreSyncEvent = false;
       syncInProgress = false;
-    }, 220);
+      justSeeked = false;
+    }, 200);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
+    // После прыжка — не переключаем play/pause насильно!
+    // Это фиксирует твою проблему — не будет паузы после перемотки если нужно playing
+    if (!data.is_paused && player.paused) {
+      player.play().catch(() => {});
+    }
+    if (data.is_paused && !player.paused) {
+      player.pause();
+    }
+    return; // Уже всё сделали
   }
 
-  // Корректируем play/pause если отличается
+  // --- Корректируем только play/pause если не было seek ---
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
     syncInProgress = true;
@@ -145,17 +152,16 @@ socket.on('sync_state', data => {
     setTimeout(() => {
       ignoreSyncEvent = false;
       syncInProgress = false;
-    }, 220);
+    }, 160);
     logOnce('[SYNC] pause');
-  }
-  if (!data.is_paused && player.paused) {
+  } else if (!data.is_paused && player.paused && !justSeeked) {
     ignoreSyncEvent = true;
     syncInProgress = true;
     player.play().then(() => {
       setTimeout(() => {
         ignoreSyncEvent = false;
         syncInProgress = false;
-      }, 220);
+      }, 160);
       logOnce('[SYNC] play');
     }).catch(() => {
       ignoreSyncEvent = false;
@@ -164,15 +170,12 @@ socket.on('sync_state', data => {
   }
 });
 
-// План Б: если sync завис, форсируем сброс, выравниваем и игнорируем sync на время
+// План Б: если sync завис, форсируем сброс и возвращаем play/pause
 function forceRecoverState(data, target) {
   ignoreSyncEvent = true;
   syncInProgress = true;
-  // 1. Останавливаем плеер, ставим правильную позицию
-  player.pause();
   player.currentTime = target;
   setTimeout(() => {
-    // 2. Пробуем play/pause по состоянию
     if (!data.is_paused) {
       player.play().then(() => {
         ignoreSyncEvent = false;
@@ -183,11 +186,12 @@ function forceRecoverState(data, target) {
         syncInProgress = false;
       });
     } else {
+      player.pause();
       ignoreSyncEvent = false;
       syncInProgress = false;
       logOnce('[ПланБ] force pause');
     }
-  }, 400);
+  }, 250);
 }
 
 function emitSyncState() {

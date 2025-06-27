@@ -2,8 +2,16 @@ const supabase = require('./supabase');
 
 const roomsState = {};
 const broadcastTimers = {};
-const BROADCAST_INTERVAL = 20000; // 20 секунд — только для редких корректировок, не для user-action!
+const BROADCAST_INTERVAL = 20000; // 20 секунд
 
+// Доп параметры для ловли sync-loop
+const SYNC_LOOP_WINDOW = 1000; // 1 сек
+const SYNC_LOOP_THRESHOLD = 5;
+const SYNC_BLOCK_MS = 1200;
+const syncLoopHistory = {};
+const syncBlockUntil = {};
+
+// --- Расчет позиции для комнаты (учитывает play/pause/speed) ---
 function calculatePosition(roomId) {
   const s = roomsState[roomId];
   if (!s) return { position: 0, is_paused: true, speed: 1, updatedAt: Date.now() };
@@ -16,6 +24,23 @@ function calculatePosition(roomId) {
     speed: s.speed,
     updatedAt: now
   };
+}
+
+// --- План Б: восстановление состояния если sync зациклился ---
+function shouldForceRecover(roomId) {
+  const now = Date.now();
+  if (!syncLoopHistory[roomId]) syncLoopHistory[roomId] = [];
+  syncLoopHistory[roomId].push(now);
+  syncLoopHistory[roomId] = syncLoopHistory[roomId].filter(t => now - t < SYNC_LOOP_WINDOW);
+  if (syncLoopHistory[roomId].length > SYNC_LOOP_THRESHOLD) {
+    syncBlockUntil[roomId] = now + SYNC_BLOCK_MS;
+    syncLoopHistory[roomId] = [];
+    return true;
+  }
+  return false;
+}
+function isSyncBlocked(roomId) {
+  return Date.now() < (syncBlockUntil[roomId] || 0);
 }
 
 function scheduleBroadcast(io, roomId) {
@@ -34,6 +59,8 @@ function clearBroadcast(io, roomId) {
     clearInterval(broadcastTimers[roomId]);
     delete broadcastTimers[roomId];
     delete roomsState[roomId];
+    delete syncLoopHistory[roomId];
+    delete syncBlockUntil[roomId];
     console.log(`[Clear] Stopped broadcast timer and cleared state for room ${roomId}`);
   }
 }
@@ -83,8 +110,7 @@ module.exports = function (io) {
           console.log(`[Init] Initialized state for room ${roomId}`);
         }
 
-        // ЛОГ — Начальный стейт при входе
-        console.log(`[Emit sync_state][JOIN] to ${socket.id} in room ${roomId}`, calculatePosition(roomId));
+        // Синхронизация при входе
         socket.emit('sync_state', calculatePosition(roomId));
         scheduleBroadcast(io, roomId);
 
@@ -96,18 +122,38 @@ module.exports = function (io) {
     socket.on('request_state', ({ roomId }) => {
       console.log(`[Request State] for room ${roomId}`);
       const syncData = calculatePosition(roomId);
-      // ЛОГ — Запрос состояния
-      console.log(`[Emit sync_state][REQUEST_STATE] to ${socket.id} in room ${roomId}`, syncData);
       socket.emit('sync_state', syncData);
     });
 
     socket.on('ping', () => socket.emit('pong'));
 
-    // --- ВСЕ действия игрока мгновенно рассылаются sync_state всем участникам!
+    // --- ГЛАВНЫЙ sync_state: любое действие пользователя рассылается всем!
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       try {
-        // ЛОГ — что пришло с клиента
-        console.log(`[Player Action][RECV] from ${socket.id} room=${roomId} position=${position} paused=${is_paused} speed=${speed}`);
+        // Если sync-loop, то форсим корректное состояние и блокируем излишние sync
+        if (shouldForceRecover(roomId)) {
+          console.log(`[ForceRecover][PLAYER_ACTION][LOOP] room=${roomId}`);
+          const now = Date.now();
+          roomsState[roomId] = {
+            time: position,
+            playing: !is_paused,
+            speed: speed || 1,
+            updatedAt: now
+          };
+          const forcedData = {
+            position,
+            is_paused,
+            speed: speed || 1,
+            updatedAt: now
+          };
+          io.to(roomId).emit('sync_state', forcedData);
+          return;
+        }
+
+        if (isSyncBlocked(roomId)) {
+          console.warn(`[SyncBlocked] room=${roomId} игнорируется sync для защиты от зацикливания`);
+          return;
+        }
 
         if (typeof position !== 'number' || position < 0) {
           console.warn(`[Player Action][BAD POSITION]`, position);
@@ -122,18 +168,12 @@ module.exports = function (io) {
           updatedAt: now
         };
 
-        // ЛОГ — что реально сохранено на сервере
-        console.log(`[Player Action][ROOM STATE] room=${roomId}`, roomsState[roomId]);
-
         const updateData = {
           position,
           is_paused,
           speed: speed || 1,
           updatedAt: now
         };
-
-        // ЛОГ — что рассылается обратно
-        console.log(`[Emit sync_state][PLAYER_ACTION] to room ${roomId}`, updateData);
 
         io.to(roomId).emit('sync_state', updateData);
 
