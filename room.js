@@ -1,3 +1,5 @@
+// room.js
+
 // ⚙️ Переменные и инициализация
 const BACKEND = location.hostname.includes('localhost')
   ? 'http://localhost:3000'
@@ -31,19 +33,20 @@ let initialSync    = null;
 let syncTimeout    = null;
 let metadataReady  = false;
 let sendLock       = false;
-let recentLocalSeek = false; // 🆕 добавлен флаг локальной перемотки
+let recentLocalSeek = false;
 
-// 🛠 Настройки синхронизации
+// 🛠 Пинг для компенсации задержек
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
   socket.once('pong', () => {
     lastPing = Date.now() - t0;
-    console.log('[PING]', lastPing, 'ms');
+    // console.log('[PING]', lastPing, 'ms');
   });
 }
 setInterval(measurePing, 10000);
 
+// 📡 Подключение и повторный коннект
 socket.on('connect', () => {
   myUserId = socket.id;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -58,7 +61,7 @@ socket.on('reconnect', () => {
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
-    `<ul>${ms.map(m => `<li>${m.user_id}</li>`).join('')}</ul>`;
+    `<ul>${ms.map(m => `<li>${m.user_id || m.id}</li>`).join('')}</ul>`;
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
@@ -89,9 +92,11 @@ function scheduleSync(d) {
   syncTimeout = setTimeout(() => doSync(d), 100);
 }
 
+// 🏆 Основная логика синхронизации как в Watch2Gether
 function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
-  if (!player || !metadataReady || recentLocalSeek) {
-    if (recentLocalSeek) console.log('⏸ doSync skipped (recent local seek)');
+  if (!player || !metadataReady) return;
+  if (recentLocalSeek) {
+    // console.log('⏸ doSync skipped (local seek)');
     return;
   }
 
@@ -102,29 +107,37 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   const delta = targetTime - player.currentTime;
   const abs = Math.abs(delta);
 
+  // Жёсткий прыжок если разница большая (например, после перемотки)
   if (abs > 1.5) {
     player.currentTime = targetTime;
-    console.log('✔ doSync → jump', targetTime.toFixed(2));
-  } else if (!isPaused && abs > 0.08) {
-    player.playbackRate = 1 + delta * 0.5;
-    console.log('✔ doSync → rate', player.playbackRate.toFixed(2));
+    // console.log('✔ doSync → jump', targetTime.toFixed(2));
+  }
+  // Плавная коррекция скорости если разница заметна, но не огромная
+  else if (!isPaused && abs > 0.12) {
+    // Ограничение скорости ±10%
+    let corr = Math.max(-0.1, Math.min(0.1, delta * 0.5));
+    player.playbackRate = 1 + corr;
+    // console.log('✔ doSync → rate', player.playbackRate.toFixed(3));
   } else {
     player.playbackRate = 1;
   }
 
+  // Управление паузой
   if (isPaused && !player.paused) {
     isRemoteAction = true;
     player.pause();
-    console.log('✔ doSync → pause');
+    // console.log('✔ doSync → pause');
   } else if (!isPaused && player.paused) {
     isRemoteAction = true;
-    player.play().then(() => console.log('✔ doSync → play')).catch(() => {});
+    player.play().catch(() => {});
+    // console.log('✔ doSync → play');
   }
 
+  // Сброс playbackRate через 250ms, чтобы не накапливалось и не ломалось.
   setTimeout(() => {
     player.playbackRate = 1;
     isRemoteAction = false;
-  }, 80);
+  }, 250);
 }
 
 // 📼 Инициализация видео
@@ -178,10 +191,11 @@ async function fetchRoom() {
       if (initialSync) doSync(initialSync);
     });
 
+    // Перемотка (локальная) — защита от "битвы seek'ов"
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
         recentLocalSeek = true;
-        setTimeout(() => recentLocalSeek = false, 1500);
+        setTimeout(() => recentLocalSeek = false, 1200); // Защита: пока seek "от нас", игнорить синк
         emitAction(v.paused);
       }
     });
@@ -196,7 +210,7 @@ async function fetchRoom() {
   }
 }
 
-// 🛰 Действие плеера
+// 🛰 Отправка своего действия плеера всем
 function emitAction(paused) {
   if (sendLock || !player) return;
   socket.emit('player_action', {
@@ -206,7 +220,7 @@ function emitAction(paused) {
     speed: player.playbackRate
   });
   sendLock = true;
-  setTimeout(() => sendLock = false, 150);
+  setTimeout(() => sendLock = false, 200);
 }
 
 // 🔄 UI utils
