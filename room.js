@@ -219,6 +219,7 @@ async function fetchRoom() {
       if (!ignoreNextEvent) {
         setTimeout(() => {
           if (wasPausedBeforeSeek && !v.paused) v.pause();
+          if (!wasPausedBeforeSeek && v.paused) v.play();
         }, 0);
         emitAction(v.paused);
         logOnce('[player] seeked emitAction');
