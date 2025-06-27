@@ -112,21 +112,36 @@ function logOnce(msg) {
 }
 function log(msg) { console.log(msg); }
 
-// --- Пинг ---
-function measurePing() {
+// --- Пинг и СТАТИСТИКА (отправлять каждую секунду!) ---
+// Измеряем пинг по своей инициативе и отправляем ВСЕМ, вместе с временем плеера
+function measureAndSendStats() {
+  if (!player || !myUserId) return;
   const t0 = Date.now();
-  socket.emit('ping');
-  socket.once('pong', () => {
-    lastPing = Date.now() - t0;
-    const myPing = lastPing;
-    // сохраняем пинг текущего пользователя
-    if (myUserId) userPingMap[myUserId] = myPing;
-    document.getElementById('pingValue').textContent = myPing;
-    logOnce(`[PING] ${myPing} ms`);
-    updateMembersList();
+  socket.emit('ping_measure');
+  socket.once('pong_measure', () => {
+    const myPing = Date.now() - t0;
+    userPingMap[myUserId] = myPing;
+    userTimeMap[myUserId] = player.currentTime;
+    // ОТПРАВИТЬ ВСЕМ своё время и пинг
+    socket.emit('update_time', {
+      roomId,
+      user_id: myUserId,
+      currentTime: player.currentTime,
+      ping: myPing
+    });
   });
 }
-setInterval(measurePing, 10000);
+// Каждую секунду отправляем актуальные данные всем (только эту функцию, всё!)
+setInterval(measureAndSendStats, 1000);
+
+// Получаем данные от других пользователей
+socket.on('user_time_update', data => {
+  if (data && data.user_id) {
+    userTimeMap[data.user_id] = data.currentTime;
+    userPingMap[data.user_id] = data.ping;
+    updateMembersList();
+  }
+});
 
 // --- Чат + Участники ---
 socket.on('connect', () => {
@@ -155,25 +170,7 @@ socket.on('system_message', msg => {
   if (msg?.text) appendSystemMessage(msg.text);
 });
 
-// ===== СИНХРОНИЗАЦИЯ ВРЕМЕНИ участников =====
-// Каждый участник сообщает своё время плеера
-setInterval(() => {
-  if (!player || !myUserId) return;
-  userTimeMap[myUserId] = player.currentTime;
-  socket.emit('update_time', { roomId, user_id: myUserId, currentTime: player.currentTime });
-  // свой пинг — уже есть в userPingMap[myUserId]
-}, 1000);
-
-// Получаем время и пинг от других
-socket.on('user_time_update', data => {
-  if (data && data.user_id) {
-    userTimeMap[data.user_id] = data.currentTime;
-    if (typeof data.ping === 'number') userPingMap[data.user_id] = data.ping;
-    updateMembersList();
-  }
-});
-
-// ФУНКЦИЯ: вывести участников и их время
+// ФУНКЦИЯ: вывести участников и их время и пинг
 function updateMembersList() {
   if (!Array.isArray(allMembers)) return;
   membersList.innerHTML =
