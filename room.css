@@ -50,8 +50,10 @@ html, body {
 .player-section {
   flex: 1;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  min-width: 0;
 }
 
 /* ======= Видео ======= */
@@ -76,7 +78,6 @@ html, body {
   outline: none;
 }
 
-/* ======= Кастомные контроллы ======= */
 .custom-video-controls {
   position: absolute;
   bottom: 0;
@@ -92,77 +93,74 @@ html, body {
   transition: background 0.16s;
   opacity: 0.96;
 }
-.custom-btn {
-  background: none;
-  border: none;
-  outline: none;
-  color: #f7f7f8;
-  font-size: 21px;
-  padding: 7px 10px;
-  margin: 0 1px;
-  border-radius: 50%;
-  cursor: pointer;
-  transition: background 0.15s, color 0.2s, box-shadow 0.2s, transform 0.08s;
-}
-.custom-btn:hover, .custom-btn:focus-visible {
-  background: #27272e;
-  color: #a970ff;
-  box-shadow: 0 1.5px 10px #a970ff30;
-}
-.custom-btn:active {
-  background: #1e1e26;
-  transform: scale(0.95);
-}
-#fullscreenBtn {
-  font-size: 19px;
-}
-.chat-toggle-btn {
-  margin-left: 10px;
-  font-size: 22px;
-  background: #a970ff22;
-  color: #a970ff;
-}
-.chat-toggle-btn:hover {
-  background: #a970ff33;
-  color: #fff;
-}
 
-/* ======= Прогресс-бар Twitch ======= */
-.custom-progress-container {
-  flex: 1 1 auto;
-  height: 7px;
-  background: #29292f;
-  border-radius: 4px;
-  cursor: pointer;
-  position: relative;
-  margin: 0 10px;
-  min-width: 80px;
-  max-width: 420px;
-  box-shadow: 0 0.5px 2.5px #000b;
-}
-.custom-progress-bar {
-  background: linear-gradient(90deg, #a970ff 40%, #f7f7f8 100%);
-  height: 100%;
-  border-radius: 4px;
-  width: 0;
-  transition: width 0.17s cubic-bezier(0.7,0.1,0.3,1);
-}
-.custom-time {
+.room-id-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #222033;
+  color: #d2a4ff;
   font-family: 'JetBrains Mono', 'Menlo', monospace;
+  border-radius: 11px;
+  margin: 13px 0 0 0;
+  padding: 6px 15px 6px 12px;
   font-size: 15px;
-  color: #c4b6f7;
-  min-width: 48px;
-  text-align: center;
-  letter-spacing: 0.01em;
-  user-select: none;
+  width: fit-content;
+  box-shadow: 0 1px 8px #2a183570;
+  user-select: text;
+}
+.room-id-badge button {
+  background: #a970ff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: 13px;
+  margin-left: 7px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.room-id-badge button:hover {
+  background: #7f4ee3;
+}
+.room-id-badge code {
+  background: none;
+  color: #fff;
+  font-size: 15px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  letter-spacing: 0.02em;
+  padding: 0 2px;
 }
 
-/* ====== Чат Twitch ====== */
+@media (max-width: 950px) {
+  .player-chat-wrap {
+    flex-direction: column;
+    align-items: center;
+  }
+  .player-section {
+    width: 100vw;
+    max-width: none;
+    justify-content: center;
+  }
+  .player-wrapper {
+    width: 100vw;
+    max-width: 100vw;
+    border-radius: 0;
+  }
+  .room-id-badge {
+    margin-left: auto;
+    margin-right: auto;
+    margin-bottom: 0;
+  }
+}
+
+/* ===== Чат ===== */
 .chat-sidebar {
   width: 370px;
   min-width: 320px;
   max-width: 420px;
-  height: calc(74vh);
+  height: auto;
   background: #201f2b;
   border-left: 2px solid #a970ff44;
   display: flex;
@@ -172,121 +170,12 @@ html, body {
   z-index: 20;
   transition: transform 0.32s cubic-bezier(0.7,0.1,0.3,1);
 }
-.chat-header {
-  background: #2c2841;
-  color: #e5e3ff;
-  font-weight: 700;
-  padding: 13px 16px;
-  font-size: 17px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1.5px solid #a970ff33;
-}
-.chat-close-btn {
-  font-size: 21px;
-  background: none;
-  color: #a970ff;
-  border: none;
-  padding: 2px 8px;
-  border-radius: 50%;
-}
-.chat-close-btn:hover {
-  background: #32235f;
-  color: #fff;
-}
-
-.chat-container {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: none;
-  border: none;
-}
-.chat-messages {
-  flex: 1 1 auto;
-  padding: 13px 14px 4px 13px;
-  overflow-y: auto;
-  font-size: 15px;
-  color: #f7f7f8;
-  background: none;
-  scroll-behavior: smooth;
-  word-break: break-word;
-}
-.chat-message {
-  margin-bottom: 11px;
-  padding: 4.5px 0;
-}
-.system-message {
-  text-align: center;
-  color: #b0adc3;
-  font-style: italic;
-  margin: 7px 0 11px 0;
-  font-size: 14px;
-}
-.chat-input-wrap {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  border-top: 1px solid #3e3757;
-  padding: 0;
-  background: #241f37;
-}
-.chat-input-wrap input {
-  flex: 1;
-  padding: 12px 14px;
-  border: none;
-  border-radius: 0 0 0 7px;
-  background: #191827;
-  color: #fff;
-  font-size: 15px;
-  outline: none;
-  box-shadow: none;
-  border-right: 1.5px solid #312466;
-  transition: background 0.18s;
-}
-.chat-input-wrap input:focus {
-  background: #231f37;
-}
-.send-btn {
-  padding: 0 21px;
-  background: #a970ff;
-  color: #fff;
-  border: none;
-  border-radius: 0 0 7px 0;
-  font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, color 0.16s, box-shadow 0.19s;
-  box-shadow: 0 2px 8px #a970ff15;
-}
-.send-btn:hover {
-  background: #7f4ee3;
-  color: #fff;
-}
-.send-btn:active {
-  background: #5c33b1;
-}
-
-/* ===== Список участников ===== */
-.chat-members {
-  background: none;
-  color: #bcbaf7;
-  font-size: 13px;
-  padding: 10px 13px;
-}
-
-/* ====== Мобильный Twitch ====== */
 @media (max-width: 950px) {
-  .player-chat-wrap {
-    flex-direction: column;
-    align-items: center;
-  }
   .chat-sidebar {
     width: 100vw;
     max-width: 100vw;
-    height: 75vh;
+    min-width: 0;
+    height: 65vh;
     position: fixed;
     right: 0;
     bottom: 0;
@@ -299,43 +188,26 @@ html, body {
   .chat-sidebar.open {
     transform: translateY(0%);
   }
-  .player-section {
-    width: 100vw;
-    max-width: none;
-    justify-content: center;
+}
+
+/* Чат по умолчанию снизу */
+@media (min-width: 950px) {
+  .chat-sidebar {
+    position: static;
+    height: auto;
+    max-height: 65vh;
+    min-width: 320px;
+    transform: none !important;
+    border-radius: 12px;
+    margin-left: 32px;
+    margin-top: 0;
   }
-  .player-wrapper {
-    width: 100vw;
-    max-width: 100vw;
-    border-radius: 0;
+  .player-chat-wrap {
+    flex-direction: row;
+    align-items: flex-start;
   }
 }
 
-/* ===== Индикатор буферизации ===== */
-.buffer-spinner {
-  width: 60px;
-  height: 60px;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 2;
-}
-.buffer-spinner .double-bounce1,
-.buffer-spinner .double-bounce2 {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background-color: #a970ff77;
-  position: absolute;
-  top: 0;
-  left: 0;
-  animation: bounce 2s infinite ease-in-out;
-}
-.buffer-spinner .double-bounce2 {
-  animation-delay: -1s;
-}
-@keyframes bounce {
-  0%, 100% { transform: scale(0); }
-  50%      { transform: scale(1); }
-}
+/* ===== Прочее, остальное оставить из твоего CSS ===== */
+
+/* ... остальной CSS как у тебя (чаты, кнопки, прогресс-бар, spinner) ... */
