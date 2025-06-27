@@ -201,6 +201,12 @@ module.exports = function (io) {
       }
     });
 
+    // ==== ВОТ ЭТО НОВОЕ СОБЫТИЕ ====
+    socket.on('update_time', data => {
+      // data = { roomId, user_id, currentTime, ping }
+      io.to(data.roomId).emit('user_time_update', data);
+    });
+
     socket.on('disconnect', async () => {
       try {
         if (!currentRoom || !userId) return;
