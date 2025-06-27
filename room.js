@@ -211,7 +211,7 @@ async function fetchRoom() {
       logOnce('[player] loadedmetadata');
     });
 
-    // Только РЕАЛЬНЫЕ действия пользователя:
+    // Только действия пользователя:
     v.addEventListener('seeking', () => {
       if (!ignoreNextEvent) {
         localSeek = true;
@@ -220,7 +220,7 @@ async function fetchRoom() {
       }
     });
 
-    // Фикс перемотки и синхронизации
+    // Фикс перемотки и sync
     v.addEventListener('seeked', () => {
       if (!ignoreNextEvent) {
         setTimeout(() => {
@@ -233,7 +233,7 @@ async function fetchRoom() {
           }
         }, 0);
 
-        emitAction(false); // Всегда после seek отсылаем is_paused: false!
+        emitAction(false); // всегда is_paused: false после seeked
         logOnce('[player] seeked emitAction (force play)');
       }
       wasPausedBeforeSeek = false;
