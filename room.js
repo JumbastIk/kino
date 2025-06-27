@@ -1,6 +1,5 @@
 // room.js
 
-// ⚙️ Переменные и инициализация
 const BACKEND = location.hostname.includes('localhost')
   ? 'http://localhost:3000'
   : 'https://kino-fhwp.onrender.com';
@@ -34,17 +33,27 @@ let syncTimeout    = null;
 let metadataReady  = false;
 let sendLock       = false;
 let recentLocalSeek = false;
+let lastSyncLog    = 0;
 
-// 🛠 Пинг для компенсации задержек
+// 🛠 Пинг
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
   socket.once('pong', () => {
     lastPing = Date.now() - t0;
-    // console.log('[PING]', lastPing, 'ms');
+    logOnce(`[PING] ${lastPing} ms`);
   });
 }
 setInterval(measurePing, 10000);
+
+// Логирование sync событий без спама (раз в 1.2 сек)
+function logOnce(msg) {
+  const now = Date.now();
+  if (now - lastSyncLog > 1200) {
+    console.log(msg);
+    lastSyncLog = now;
+  }
+}
 
 // 📡 Подключение и повторный коннект
 socket.on('connect', () => {
@@ -80,23 +89,23 @@ function sendMessage() {
 }
 
 // 🔄 Синхронизация
-socket.on('sync_state', d => scheduleSync(d));
-socket.on('player_update', d => scheduleSync(d));
+socket.on('sync_state', d => scheduleSync(d, 'sync_state'));
+socket.on('player_update', d => scheduleSync(d, 'player_update'));
 
-function scheduleSync(d) {
+function scheduleSync(d, source) {
   if (!metadataReady) {
     initialSync = d;
     return;
   }
   clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(() => doSync(d), 100);
+  syncTimeout = setTimeout(() => doSync(d, source), 100);
 }
 
-// 🏆 Основная логика синхронизации как в Watch2Gether
-function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
+// --- КЛЮЧЕВАЯ ЛОГИКА синхронизации --- //
+function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }, source = '') {
   if (!player || !metadataReady) return;
   if (recentLocalSeek) {
-    // console.log('⏸ doSync skipped (local seek)');
+    logOnce('⏸ doSync SKIPPED (recent local seek)');
     return;
   }
 
@@ -107,33 +116,30 @@ function doSync({ position: pos, is_paused: isPaused, updatedAt: serverTs }) {
   const delta = targetTime - player.currentTime;
   const abs = Math.abs(delta);
 
-  // Жёсткий прыжок если разница большая (например, после перемотки)
+  // Жёсткая коррекция, если разница большая
   if (abs > 1.5) {
     player.currentTime = targetTime;
-    // console.log('✔ doSync → jump', targetTime.toFixed(2));
+    logOnce(`✔ doSync [${source}] → JUMP: ${targetTime.toFixed(2)} (cur: ${player.currentTime.toFixed(2)})`);
   }
-  // Плавная коррекция скорости если разница заметна, но не огромная
+  // Плавная корректировка скорости, если расхождение не критичное
   else if (!isPaused && abs > 0.12) {
-    // Ограничение скорости ±10%
-    let corr = Math.max(-0.1, Math.min(0.1, delta * 0.5));
+    let corr = Math.max(-0.10, Math.min(0.10, delta * 0.5));
     player.playbackRate = 1 + corr;
-    // console.log('✔ doSync → rate', player.playbackRate.toFixed(3));
+    logOnce(`✔ doSync [${source}] → RATE: ${player.playbackRate.toFixed(3)} (delta ${delta.toFixed(3)})`);
   } else {
     player.playbackRate = 1;
   }
 
-  // Управление паузой
+  // Логика паузы — должна срабатывать моментально, особенно после seek
   if (isPaused && !player.paused) {
     isRemoteAction = true;
     player.pause();
-    // console.log('✔ doSync → pause');
+    logOnce(`✔ doSync [${source}] → PAUSE`);
   } else if (!isPaused && player.paused) {
     isRemoteAction = true;
-    player.play().catch(() => {});
-    // console.log('✔ doSync → play');
+    player.play().then(() => logOnce(`✔ doSync [${source}] → PLAY`)).catch(() => {});
   }
 
-  // Сброс playbackRate через 250ms, чтобы не накапливалось и не ломалось.
   setTimeout(() => {
     player.playbackRate = 1;
     isRemoteAction = false;
@@ -188,19 +194,26 @@ async function fetchRoom() {
 
     v.addEventListener('loadedmetadata', () => {
       metadataReady = true;
-      if (initialSync) doSync(initialSync);
+      if (initialSync) doSync(initialSync, 'init');
     });
 
-    // Перемотка (локальная) — защита от "битвы seek'ов"
+    // --- Перемотка/Seek: при паузе — не даём видео начать играть! --- //
+    v.addEventListener('seeking', () => {
+      if (!isRemoteAction) recentLocalSeek = true;
+    });
     v.addEventListener('seeked', () => {
       if (!isRemoteAction) {
-        recentLocalSeek = true;
-        setTimeout(() => recentLocalSeek = false, 1200); // Защита: пока seek "от нас", игнорить синк
+        setTimeout(() => recentLocalSeek = false, 1200);
         emitAction(v.paused);
+        // Если пользователь был на паузе до seek, возвращаем паузу МГНОВЕННО
+        if (v.paused) {
+          setTimeout(() => { if (!v.paused) v.pause(); }, 20); // "kick" если вдруг пошло play
+        }
       }
     });
-    v.addEventListener('play',   () => !isRemoteAction && emitAction(false));
-    v.addEventListener('pause',  () => !isRemoteAction && emitAction(true));
+
+    v.addEventListener('play', () => !isRemoteAction && emitAction(false));
+    v.addEventListener('pause', () => !isRemoteAction && emitAction(true));
 
     player = v;
 
@@ -210,7 +223,7 @@ async function fetchRoom() {
   }
 }
 
-// 🛰 Отправка своего действия плеера всем
+// 🛰 Действие плеера
 function emitAction(paused) {
   if (sendLock || !player) return;
   socket.emit('player_action', {
