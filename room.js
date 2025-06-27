@@ -12,17 +12,40 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
+// DOM elements
 const playerWrapper = document.getElementById('playerWrapper');
-const backLink      = document.getElementById('backLink');
-const messagesBox   = document.getElementById('messages');
-const membersList   = document.getElementById('membersList');
-const msgInput      = document.getElementById('msgInput');
-const sendBtn       = document.getElementById('sendBtn');
+const video = document.getElementById('videoPlayer');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const muteBtn = document.getElementById('muteBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+const openChatBtn = document.getElementById('openChatBtn');
+const progressContainer = document.getElementById('progressContainer');
+const progressBar = document.getElementById('progressBar');
+const currentTimeLabel = document.getElementById('currentTimeLabel');
+const durationLabel = document.getElementById('durationLabel');
+const chatSidebar = document.getElementById('chatSidebar');
+const closeChatBtn = document.getElementById('closeChatBtn');
+const messagesBox = document.getElementById('messages');
+const membersList = document.getElementById('membersList');
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
 
-let player, spinner, lastPing = 0, myUserId = null, initialSync = null;
+let player = video, spinner, lastPing = 0, myUserId = null, initialSync = null;
 let metadataReady = false, lastSyncLog = 0;
+let ignoreSyncEvent = false, lastSyncApply = 0, syncProblemDetected = false, syncErrorTimeout = null;
 
-// Логгер (throttle)
+// --- Логика Чата Twitch ---
+openChatBtn.addEventListener('click', () => {
+  chatSidebar.classList.add('open');
+});
+closeChatBtn.addEventListener('click', () => {
+  chatSidebar.classList.remove('open');
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') chatSidebar.classList.remove('open');
+});
+
+// --- Логгер (throttle) ---
 function logOnce(msg) {
   const now = Date.now();
   if (now - lastSyncLog > 600) {
@@ -32,7 +55,7 @@ function logOnce(msg) {
 }
 function log(msg) { console.log(msg); }
 
-// Пинг
+// --- Пинг ---
 function measurePing() {
   const t0 = Date.now();
   socket.emit('ping');
@@ -43,7 +66,7 @@ function measurePing() {
 }
 setInterval(measurePing, 10000);
 
-// --- Подключение и Чат --- //
+// --- Чат + Участники ---
 socket.on('connect', () => {
   myUserId = socket.id;
   log(`[connect] id=${myUserId}`);
@@ -55,7 +78,6 @@ socket.on('reconnect', () => {
   log('[reconnect]');
   socket.emit('request_state', { roomId });
 });
-
 socket.on('members', ms => {
   membersList.innerHTML =
     `<div class="chat-members-label">Участники (${ms.length}):</div>` +
@@ -88,27 +110,21 @@ function sendMessage() {
   logOnce(`[chat][me]: ${t}`);
 }
 
-// --- СИНХРОНИЗАЦИЯ + Восстановление при рассинхроне или ошибках --- //
-let ignoreSyncEvent = false;
-let lastSyncApply = 0;
-let syncProblemDetected = false;
-let syncErrorTimeout = null;
-
+// --- СИНХРОНИЗАЦИЯ --- //
 function applySyncState(data) {
   if (!metadataReady || !player) return;
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
 
-  // Если рассинхрон больше 0.5 сек, корректируем позицию
+  // Рассинхрон больше 0.5 сек — корректируем
   if (Math.abs(player.currentTime - target) > 0.5) {
     ignoreSyncEvent = true;
     player.currentTime = target;
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
-
-  // Корректируем play/pause если отличается
+  // Play/pause state
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
     player.pause();
@@ -122,8 +138,6 @@ function applySyncState(data) {
       logOnce('[SYNC] play');
     }).catch(() => { ignoreSyncEvent = false; });
   }
-
-  // Зафиксировать время последней нормальной синхронизации
   lastSyncApply = Date.now();
   syncProblemDetected = false;
   if (syncErrorTimeout) {
@@ -132,17 +146,13 @@ function applySyncState(data) {
   }
 }
 
-// ** Главное: если клиент подвис/рассинхрон — запросить актуальное состояние с сервера **
 function planB_RequestServerState() {
   logOnce('[PLAN B] Force re-sync: request_state');
   socket.emit('request_state', { roomId });
 }
 
-// Получить sync_state с сервера
 socket.on('sync_state', data => {
   applySyncState(data);
-
-  // Если sync_state не обновляется слишком долго — триггерим Plan B!
   if (syncErrorTimeout) clearTimeout(syncErrorTimeout);
   syncErrorTimeout = setTimeout(() => {
     if (Date.now() - lastSyncApply > 1600) {
@@ -152,7 +162,6 @@ socket.on('sync_state', data => {
   }, 1700);
 });
 
-// При каждом действии — сразу отправляем состояние на сервер
 function emitSyncState() {
   if (!player) return;
   socket.emit('player_action', {
@@ -163,16 +172,6 @@ function emitSyncState() {
   logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
 }
 
-function setupSyncHandlers(v) {
-  v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
-  v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
-  v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
-
-  // Защитное: если обнаружена ошибка плеера — план Б (запросить состояние)
-  v.addEventListener('error',  () => planB_RequestServerState());
-  v.addEventListener('stalled',() => planB_RequestServerState());
-}
-
 // --- Видео-плеер + UI --- //
 async function fetchRoom() {
   try {
@@ -181,54 +180,35 @@ async function fetchRoom() {
     const { movie_id } = await res.json();
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
-
     backLink.href = `${movie.html}?id=${movie.id}`;
-    playerWrapper.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.style.position = 'relative';
-    wrap.innerHTML = `<video id="videoPlayer" controls muted playsinline crossorigin="anonymous"
-      style="width:100%;border-radius:14px;"></video>`;
-    spinner = createSpinner();
-    wrap.appendChild(spinner);
-    playerWrapper.appendChild(wrap);
-
-    const badge = document.createElement('div');
-    badge.className = 'room-id-badge';
-    badge.innerHTML = `
-      <small>ID комнаты:</small><code>${roomId}</code>
-      <button id="copyRoomId">Копировать</button>
-    `;
-    playerWrapper.after(badge);
-    document.getElementById('copyRoomId').onclick = () => {
-      navigator.clipboard.writeText(roomId);
-      alert('Скопировано');
-    };
-
-    const v = document.getElementById('videoPlayer');
+    // (Плеер уже в html)
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
-      hls.attachMedia(v);
+      hls.attachMedia(video);
       hls.on(Hls.Events.ERROR, (e, data) => {
         log(`[HLS ERROR]`, data);
-        spinner.style.display = 'none';
         planB_RequestServerState();
       });
-      v.addEventListener('waiting', () => spinner.style.display = 'block');
-      v.addEventListener('playing', () => spinner.style.display = 'none');
-    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-      v.src = movie.videoUrl;
+      video.addEventListener('waiting', showSpinner);
+      video.addEventListener('playing', hideSpinner);
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
-
-    v.addEventListener('loadedmetadata', () => {
+    video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
-      setupSyncHandlers(v);
-      player = v;
+      setupSyncHandlers(video);
+      player = video;
       socket.emit('request_state', { roomId });
+      durationLabel.textContent = formatTime(player.duration || 0);
       logOnce('[player] loadedmetadata');
     });
-
-    player = v;
+    video.addEventListener('timeupdate', updateProgressBar);
+    video.addEventListener('durationchange', () => {
+      durationLabel.textContent = formatTime(player.duration || 0);
+    });
+    setupCustomControls();
+    hideSpinner();
     logOnce('[player] инициализирован');
   } catch (err) {
     console.error(err);
@@ -236,7 +216,65 @@ async function fetchRoom() {
   }
 }
 
-// --- UI --- //
+// --- Custom Twitch Controls Logic ---
+function setupCustomControls() {
+  playPauseBtn.addEventListener('click', () => {
+    if (player.paused) player.play();
+    else player.pause();
+  });
+  muteBtn.addEventListener('click', () => {
+    player.muted = !player.muted;
+    updateMuteIcon();
+  });
+  fullscreenBtn.addEventListener('click', () => {
+    if (player.requestFullscreen) player.requestFullscreen();
+    else if (player.webkitRequestFullscreen) player.webkitRequestFullscreen();
+    else if (player.msRequestFullscreen) player.msRequestFullscreen();
+  });
+
+  progressContainer.addEventListener('click', e => {
+    const rect = progressContainer.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    player.currentTime = player.duration * percent;
+    emitSyncState();
+  });
+
+  player.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
+  player.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
+  player.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
+  player.addEventListener('volumechange', updateMuteIcon);
+
+  updatePlayIcon();
+  updateMuteIcon();
+}
+
+function updateProgressBar() {
+  if (!player.duration) return;
+  const percent = (player.currentTime / player.duration) * 100;
+  progressBar.style.width = percent + '%';
+  currentTimeLabel.textContent = formatTime(player.currentTime);
+  durationLabel.textContent = formatTime(player.duration);
+}
+
+function updatePlayIcon() {
+  playPauseBtn.textContent = player.paused ? '▶️' : '⏸️';
+}
+
+function updateMuteIcon() {
+  muteBtn.textContent = player.muted || player.volume === 0 ? '🔇' : '🔊';
+}
+
+// --- Spinner ---
+function showSpinner() {
+  if (!spinner) {
+    spinner = createSpinner();
+    playerWrapper.appendChild(spinner);
+  }
+  spinner.style.display = 'block';
+}
+function hideSpinner() {
+  if (spinner) spinner.style.display = 'none';
+}
 function createSpinner() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
@@ -244,6 +282,15 @@ function createSpinner() {
   s.style.display = 'none';
   return s;
 }
+
+// --- Формат времени ---
+function formatTime(t) {
+  t = Math.floor(t || 0);
+  if (t >= 3600) return `${Math.floor(t/3600)}:${String(Math.floor((t%3600)/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
+  else return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
+}
+
+// --- Сообщения чата ---
 function appendMessage(author, text) {
   const d = document.createElement('div');
   d.className = 'chat-message';
