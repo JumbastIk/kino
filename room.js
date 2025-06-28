@@ -140,11 +140,13 @@ socket.on('connect', () => {
   myUserId = socket.id;
   log(`[connect] id=${myUserId}`);
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
+  // ОБЯЗАТЕЛЬНО: сразу после коннекта спрашиваем sync_state у сервера!
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 socket.on('reconnect', () => {
   log('[reconnect]');
+  // ОБЯЗАТЕЛЬНО: всегда сразу request_state при reconnect!
   socket.emit('request_state', { roomId });
 });
 socket.on('members', ms => {
@@ -182,11 +184,13 @@ function updateMembersList() {
 }
 
 // --- СИНХРОНИЗАЦИЯ ---
+// Главный принцип: ВСЕГДА брать sync_state только с сервера!
 function applySyncState(data) {
   if (!metadataReady || !player) return;
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
+  // Не важно кто инициатор, ВСЕГДА доверяем серверу
   if (Math.abs(player.currentTime - target) > 0.5) {
     ignoreSyncEvent = true;
     player.currentTime = target;
@@ -212,8 +216,8 @@ function applySyncState(data) {
     clearTimeout(syncErrorTimeout);
     syncErrorTimeout = null;
   }
-  updateProgressBar();        // ФИКС: всегда обновлять положение точки прогресса
-  readyForControl = true;     // ФИКС: всегда разрешать управление после sync
+  updateProgressBar();
+  readyForControl = true;     // ВСЕГДА разрешаем управление после sync_state
   enableControls();
   hideSpinner();
 }
@@ -240,6 +244,7 @@ socket.on('sync_state', data => {
 });
 function emitSyncState() {
   if (!player) return;
+  // Любое действие пользователя — только запрос серверу!
   socket.emit('player_action', {
     roomId,
     position: player.currentTime,
@@ -274,6 +279,7 @@ async function fetchRoom() {
       metadataReady = true;
       setupSyncHandlers(video);
       player = video;
+      // Важно: после загрузки метаданных сразу просим sync_state у сервера
       socket.emit('request_state', { roomId });
       durationLabel.textContent = formatTime(player.duration || 0);
       logOnce('[player] loadedmetadata');
@@ -294,6 +300,7 @@ async function fetchRoom() {
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
+    // Только запрос серверу — изменение произойдёт только после sync_state!
     if (player.paused) player.play();
     else player.pause();
   });
