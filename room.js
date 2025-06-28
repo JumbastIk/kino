@@ -18,7 +18,6 @@ const video           = document.getElementById('videoPlayer');
 const playPauseBtn    = document.getElementById('playPauseBtn');
 const muteBtn         = document.getElementById('muteBtn');
 const fullscreenBtn   = document.getElementById('fullscreenBtn');
-// const openChatBtn   = document.getElementById('openChatBtn'); // убрано
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
 const currentTimeLabel  = document.getElementById('currentTimeLabel');
@@ -34,7 +33,6 @@ const backLink          = document.getElementById('backLink');
 const roomIdCode        = document.getElementById('roomIdCode');
 const copyRoomId        = document.getElementById('copyRoomId');
 
-// Верно показываем id комнаты сразу при загрузке
 if (roomIdCode) roomIdCode.textContent = roomId;
 if (copyRoomId) copyRoomId.onclick = () => {
   navigator.clipboard.writeText(roomId);
@@ -46,40 +44,10 @@ let metadataReady = false, lastSyncLog = 0;
 let ignoreSyncEvent = false, lastSyncApply = 0, syncProblemDetected = false, syncErrorTimeout = null;
 let readyForControl = false;
 
-// ===== СТРУКТУРЫ для каждого участника =====
 let allMembers = [];
 let userTimeMap = {};
 let userPingMap = {};
 
-// Overlay для автозапуска
-let userInteracted = false;
-let initialSyncDone = false;
-const overlay = document.createElement('div');
-overlay.style = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.88);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;font-family:sans-serif;';
-overlay.innerHTML = `
-  <div style="text-align:center;">
-    <div style="font-size:32px;margin-bottom:14px;">▶️ Начать просмотр</div>
-    <div>Для запуска синхронного просмотра<br>нажмите в любом месте</div>
-  </div>
-`;
-overlay.onclick = () => {
-  userInteracted = true;
-  overlay.style.display = 'none';
-  if (player.paused) player.play();
-};
-document.body.appendChild(overlay);
-overlay.style.display = 'none';
-
-// Вешаем событие на любое взаимодействие (клик/тап/клавиатура)
-['pointerdown','keydown','touchstart'].forEach(ev => {
-  document.body.addEventListener(ev, () => {
-    userInteracted = true;
-    overlay.style.display = 'none';
-    if (player.paused && initialSyncDone) player.play();
-  });
-});
-
-// Контролы неактивны до sync
 disableControls();
 function enableControls() {
   playPauseBtn.style.pointerEvents     = '';
@@ -102,7 +70,6 @@ function disableControls() {
   progressContainer.style.opacity      = '.6';
 }
 
-// --- ЧАТ (упрощён, без сайдбара!) ---
 function appendMessage(author, text) {
   const d1 = document.createElement('div');
   d1.className = 'chat-message';
@@ -126,7 +93,6 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// --- Логгер ---
 function logOnce(msg) {
   const now = Date.now();
   if (now - lastSyncLog > 600) {
@@ -136,7 +102,6 @@ function logOnce(msg) {
 }
 function log(msg) { console.log(msg); }
 
-// --- Пинг и время для всех участников ---
 function measurePingAndSend() {
   if (!player || !myUserId) return;
   const t0 = Date.now();
@@ -163,7 +128,6 @@ socket.on('user_time_update', data => {
   }
 });
 
-// --- Чат + Участники ---
 socket.on('connect', () => {
   myUserId = socket.id;
   log(`[connect] id=${myUserId}`);
@@ -190,7 +154,6 @@ socket.on('system_message', msg => {
   if (msg?.text) appendSystemMessage(msg.text);
 });
 
-// ФУНКЦИЯ: вывести участников и их время и пинг
 function updateMembersList() {
   if (!Array.isArray(allMembers)) return;
   membersList.innerHTML =
@@ -210,13 +173,13 @@ function updateMembersList() {
 }
 
 // --- СИНХРОНИЗАЦИЯ ---
-// КЛЮЧ: после reload, если браузер не даёт автозапуск — показываем overlay
 function applySyncState(data) {
   if (!metadataReady || !player) return;
-  initialSyncDone = true;
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
+
+  // ВАЖНО: ВСЕГДА доверяем sync_state, даже если только что кто-то перезашёл!
   if (Math.abs(player.currentTime - target) > 0.5) {
     ignoreSyncEvent = true;
     player.currentTime = target;
@@ -230,18 +193,11 @@ function applySyncState(data) {
     logOnce('[SYNC] pause');
   }
   if (!data.is_paused && player.paused) {
-    if (userInteracted || document.hasFocus()) {
-      ignoreSyncEvent = true;
-      player.play().then(() => {
-        setTimeout(() => { ignoreSyncEvent = false; }, 150);
-        logOnce('[SYNC] play');
-      }).catch(() => {
-        ignoreSyncEvent = false;
-        overlay.style.display = 'flex';
-      });
-    } else {
-      overlay.style.display = 'flex';
-    }
+    ignoreSyncEvent = true;
+    player.play().then(() => {
+      setTimeout(() => { ignoreSyncEvent = false; }, 150);
+      logOnce('[SYNC] play');
+    }).catch(() => { ignoreSyncEvent = false; });
   }
   lastSyncApply = Date.now();
   syncProblemDetected = false;
@@ -250,12 +206,12 @@ function applySyncState(data) {
     syncErrorTimeout = null;
   }
   updateProgressBar();
+  // ВСЕГДА после sync_state делаем enableControls!
   readyForControl = true;
   enableControls();
   hideSpinner();
 }
 
-// === ФИКС: защита от частого planB_RequestServerState ===
 let lastPlanB = 0;
 function planB_RequestServerState() {
   const now = Date.now();
@@ -285,7 +241,6 @@ function emitSyncState() {
   logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
 }
 
-// --- Видео-плеер + UI ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -387,7 +342,6 @@ function updateMuteIcon() {
   muteBtn.textContent = player.muted || player.volume === 0 ? '🔇' : '🔊';
 }
 
-// --- Spinner ---
 function showSpinner() {
   if (!spinner) {
     spinner = createSpinner();
@@ -406,7 +360,6 @@ function createSpinner() {
   return s;
 }
 
-// --- Формат времени ---
 function formatTime(t) {
   t = Math.floor(t || 0);
   if (t >= 3600) return `${Math.floor(t/3600)}:${String(Math.floor((t%3600)/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
