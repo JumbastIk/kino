@@ -4,14 +4,14 @@ const roomsState = {};
 const broadcastTimers = {};
 const BROADCAST_INTERVAL = 20000; // 20 секунд
 
-// Доп параметры для ловли sync-loop
-const SYNC_LOOP_WINDOW = 1000; // 1 сек
+// --- sync-loop detection (не трогаем, пусть работает для защиты от зацикливания) ---
+const SYNC_LOOP_WINDOW = 1000;
 const SYNC_LOOP_THRESHOLD = 5;
 const SYNC_BLOCK_MS = 1200;
 const syncLoopHistory = {};
 const syncBlockUntil = {};
 
-// --- Расчет позиции для комнаты (учитывает play/pause/speed) ---
+// --- Расчет позиции для комнаты ---
 function calculatePosition(roomId) {
   const s = roomsState[roomId];
   if (!s) return { position: 0, is_paused: true, speed: 1, updatedAt: Date.now() };
@@ -26,7 +26,6 @@ function calculatePosition(roomId) {
   };
 }
 
-// --- План Б: восстановление состояния если sync зациклился ---
 function shouldForceRecover(roomId) {
   const now = Date.now();
   if (!syncLoopHistory[roomId]) syncLoopHistory[roomId] = [];
@@ -40,7 +39,7 @@ function shouldForceRecover(roomId) {
   return false;
 }
 function isSyncBlocked(roomId) {
-  return false; // <--- Фикс, теперь play/pause всегда разрешён
+  return false;
 }
 
 function scheduleBroadcast(io, roomId) {
@@ -99,6 +98,7 @@ module.exports = function (io) {
           .order('created_at', { ascending: true });
         socket.emit('history', messages);
 
+        // --- Ключевое отличие: НЕ СБРАСЫВАЕМ состояние комнаты при новом участнике! ---
         if (!roomsState[roomId]) {
           roomsState[roomId] = {
             time: 0,
@@ -109,7 +109,7 @@ module.exports = function (io) {
           console.log(`[Init] Initialized state for room ${roomId}`);
         }
 
-        // Синхронизация при входе
+        // Новый участник всегда просто запрашивает sync_state и подстраивается
         socket.emit('sync_state', calculatePosition(roomId));
         scheduleBroadcast(io, roomId);
 
@@ -126,10 +126,9 @@ module.exports = function (io) {
 
     socket.on('ping', () => socket.emit('pong'));
 
-    // --- sync_state: любое действие пользователя рассылается всем! ---
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       try {
-        // Если sync-loop, то форсим корректное состояние и блокируем излишние sync
+        // Не нужно отдавать никакому пользователю "право быть главным"!
         if (shouldForceRecover(roomId)) {
           console.log(`[ForceRecover][PLAYER_ACTION][LOOP] room=${roomId}`);
           const now = Date.now();
@@ -150,7 +149,6 @@ module.exports = function (io) {
         }
 
         if (isSyncBlocked(roomId)) {
-          // Теперь всегда false, блокировка отключена!
           return;
         }
 
@@ -159,6 +157,7 @@ module.exports = function (io) {
           return;
         }
 
+        // Просто обновляем состояние и уведомляем всех, что бы кто ни сделал
         const now = Date.now();
         roomsState[roomId] = {
           time: position,
@@ -201,7 +200,6 @@ module.exports = function (io) {
     });
 
     socket.on('update_time', data => {
-      // data = { roomId, user_id, currentTime, ping }
       io.to(data.roomId).emit('user_time_update', data);
     });
 

@@ -18,7 +18,6 @@ const video           = document.getElementById('videoPlayer');
 const playPauseBtn    = document.getElementById('playPauseBtn');
 const muteBtn         = document.getElementById('muteBtn');
 const fullscreenBtn   = document.getElementById('fullscreenBtn');
-// const openChatBtn   = document.getElementById('openChatBtn'); // убрано
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
 const currentTimeLabel  = document.getElementById('currentTimeLabel');
@@ -139,12 +138,16 @@ socket.on('user_time_update', data => {
 socket.on('connect', () => {
   myUserId = socket.id;
   log(`[connect] id=${myUserId}`);
+  readyForControl = false; // <--- БЛОК управления!
+  disableControls();       // <--- БЛОК управления!
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 socket.on('reconnect', () => {
   log('[reconnect]');
+  readyForControl = false; // <--- БЛОК управления!
+  disableControls();
   socket.emit('request_state', { roomId });
 });
 socket.on('members', ms => {
@@ -212,10 +215,12 @@ function applySyncState(data) {
     clearTimeout(syncErrorTimeout);
     syncErrorTimeout = null;
   }
-  updateProgressBar();        // ФИКС: всегда обновлять положение точки прогресса
-  readyForControl = true;     // ФИКС: всегда разрешать управление после sync
-  enableControls();
-  hideSpinner();
+  updateProgressBar();
+  if (!readyForControl) {
+    readyForControl = true;
+    enableControls();
+    hideSpinner();
+  }
 }
 
 // === ФИКС: защита от частого planB_RequestServerState ===
