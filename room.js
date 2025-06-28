@@ -138,15 +138,15 @@ socket.on('user_time_update', data => {
 socket.on('connect', () => {
   myUserId = socket.id;
   log(`[connect] id=${myUserId}`);
-  readyForControl = false; // <--- БЛОК управления!
-  disableControls();       // <--- БЛОК управления!
+  readyForControl = false;
+  disableControls();
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 socket.on('reconnect', () => {
   log('[reconnect]');
-  readyForControl = false; // <--- БЛОК управления!
+  readyForControl = false;
   disableControls();
   socket.emit('request_state', { roomId });
 });
@@ -187,6 +187,9 @@ function updateMembersList() {
 // --- СИНХРОНИЗАЦИЯ ---
 function applySyncState(data) {
   if (!metadataReady || !player) return;
+  // Гарантируем mute всегда при синхронизации — это критично для autoplay на мобилах!
+  if (!player.muted) player.muted = true;
+
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
@@ -207,7 +210,10 @@ function applySyncState(data) {
     player.play().then(() => {
       setTimeout(() => { ignoreSyncEvent = false; }, 150);
       logOnce('[SYNC] play');
-    }).catch(() => { ignoreSyncEvent = false; });
+    }).catch(() => {
+      ignoreSyncEvent = false;
+      // Ничего не делаем — просто повторит попытку на след. sync_state
+    });
   }
   lastSyncApply = Date.now();
   syncProblemDetected = false;
@@ -275,6 +281,8 @@ async function fetchRoom() {
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
+    // *** КРИТИЧНО: mute до любого play, и только после loadedmetadata делаем sync ***
+    video.muted = true;
     video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       setupSyncHandlers(video);
