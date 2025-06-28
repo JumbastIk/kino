@@ -13,11 +13,11 @@ if (!roomId) {
 }
 
 // DOM elements
-const playerWrapper   = document.getElementById('playerWrapper');
-const video           = document.getElementById('videoPlayer');
-const playPauseBtn    = document.getElementById('playPauseBtn');
-const muteBtn         = document.getElementById('muteBtn');
-const fullscreenBtn   = document.getElementById('fullscreenBtn');
+const playerWrapper     = document.getElementById('playerWrapper');
+const video             = document.getElementById('videoPlayer');
+const playPauseBtn      = document.getElementById('playPauseBtn');
+const muteBtn           = document.getElementById('muteBtn');
+const fullscreenBtn     = document.getElementById('fullscreenBtn');
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
 const currentTimeLabel  = document.getElementById('currentTimeLabel');
@@ -40,51 +40,59 @@ if (copyRoomId) copyRoomId.onclick = () => {
   alert('Скопировано!');
 };
 
-let player = video, spinner, lastPing = 0, myUserId = null;
-let metadataReady = false, lastSyncLog = 0;
-let ignoreSyncEvent = false, lastSyncApply = 0, syncProblemDetected = false, syncErrorTimeout = null;
-let readyForControl = false;
+let player            = video,
+    spinner,
+    lastPing          = 0,
+    myUserId          = null;
+let metadataReady     = false,
+    lastSyncLog       = 0;
+let ignoreSyncEvent   = false,
+    lastSyncApply     = 0,
+    syncProblemDetected = false,
+    syncErrorTimeout  = null;
+let readyForControl   = false;
+
+// Флаг для реальных действий пользователя
+let isUserAction = false;
 
 // ===== СТРУКТУРЫ для каждого участника =====
-let allMembers = [];
+let allMembers  = [];
 let userTimeMap = {};
 let userPingMap = {};
 
-// Флаги для предотвращения автопаузы от ОС/браузера
-let mobileAutoplayPauseBug = false;
-let firstSyncDone = false;
-let pageHidden = false;
+// Блокируем свайпы и включаем подтверждение закрытия в Telegram
+if (window.Telegram?.WebApp) {
+  Telegram.WebApp.disableVerticalSwipes();
+  Telegram.WebApp.enableClosingConfirmation();
+}
 
-// === visibilitychange: определяем свернута ли страница/приложение ===
-document.addEventListener('visibilitychange', function() {
-  pageHidden = (document.visibilityState === 'hidden');
-  if (!pageHidden) {
-    // При возвращении просто запросить sync с сервера (не отправляем pause)
-    socket.emit('request_state', { roomId });
-  }
-});
+// Устанавливаем атрибуты плеера для inline-воспроизведения на мобиле
+video.setAttribute('playsinline', '');
+video.setAttribute('webkit-playsinline', '');
+video.autoplay = true;
+video.muted    = true;
 
 // Контролы неактивны до sync
 disableControls();
 function enableControls() {
-  playPauseBtn.style.pointerEvents     = '';
-  muteBtn.style.pointerEvents          = '';
-  fullscreenBtn.style.pointerEvents    = '';
+  playPauseBtn.style.pointerEvents      = '';
+  muteBtn.style.pointerEvents           = '';
+  fullscreenBtn.style.pointerEvents     = '';
   progressContainer.style.pointerEvents = '';
-  playPauseBtn.style.opacity           = '';
-  muteBtn.style.opacity                = '';
-  fullscreenBtn.style.opacity          = '';
-  progressContainer.style.opacity      = '';
+  playPauseBtn.style.opacity            = '';
+  muteBtn.style.opacity                 = '';
+  fullscreenBtn.style.opacity           = '';
+  progressContainer.style.opacity       = '';
 }
 function disableControls() {
-  playPauseBtn.style.pointerEvents     = 'none';
-  muteBtn.style.pointerEvents          = 'none';
-  fullscreenBtn.style.pointerEvents    = 'none';
+  playPauseBtn.style.pointerEvents      = 'none';
+  muteBtn.style.pointerEvents           = 'none';
+  fullscreenBtn.style.pointerEvents     = 'none';
   progressContainer.style.pointerEvents = 'none';
-  playPauseBtn.style.opacity           = '.6';
-  muteBtn.style.opacity                = '.6';
-  fullscreenBtn.style.opacity          = '.6';
-  progressContainer.style.opacity      = '.6';
+  playPauseBtn.style.opacity            = '.6';
+  muteBtn.style.opacity                 = '.6';
+  fullscreenBtn.style.opacity           = '.6';
+  progressContainer.style.opacity       = '.6';
 }
 
 // --- ЧАТ (упрощён, без сайдбара!) ---
@@ -185,10 +193,10 @@ function updateMembersList() {
   membersList.innerHTML =
     allMembers
       .map(m => {
-        const userId = m.user_id || m.id || '';
-        const displayName = m.first_name || userId;
-        const curTime = userTimeMap[userId] ?? 0;
-        const ping = userPingMap[userId] ?? '-';
+        const userId     = m.user_id || m.id || '';
+        const displayName= m.first_name || userId;
+        const curTime    = userTimeMap[userId] ?? 0;
+        const ping       = userPingMap[userId] ?? '-';
         return `<li>
           <span class="member-name">${displayName}</span>
           <span class="member-time" style="margin-left:8px;font-family:monospace">${formatTime(curTime)}</span>
@@ -199,22 +207,26 @@ function updateMembersList() {
 }
 
 // --- СИНХРОНИЗАЦИЯ ---
+let mobileAutoplayPauseBug = false;
+let firstSyncDone         = false;
+
 function applySyncState(data) {
   if (!metadataReady || !player) return;
-  // mute всегда для autoplay на мобилах
   if (!player.muted) player.muted = true;
 
-  const now = Date.now();
+  const now             = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
-  const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
+  const target          = data.is_paused ? data.position : data.position + timeSinceUpdate;
+
   if (Math.abs(player.currentTime - target) > 0.5) {
     ignoreSyncEvent = true;
     player.currentTime = target;
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
-  // костыль: только первая sync — не отправлять pause на мобиле
+
   if (!firstSyncDone) mobileAutoplayPauseBug = true;
+
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
     player.pause();
@@ -230,13 +242,15 @@ function applySyncState(data) {
       ignoreSyncEvent = false;
     });
   }
-  lastSyncApply = Date.now();
+
+  lastSyncApply     = Date.now();
   syncProblemDetected = false;
   if (syncErrorTimeout) {
     clearTimeout(syncErrorTimeout);
     syncErrorTimeout = null;
   }
   updateProgressBar();
+
   if (!readyForControl) {
     readyForControl = true;
     enableControls();
@@ -249,7 +263,7 @@ function applySyncState(data) {
 let lastPlanB = 0;
 function planB_RequestServerState() {
   const now = Date.now();
-  if (now - lastPlanB < 4000) return; // Не чаще, чем раз в 4 сек
+  if (now - lastPlanB < 4000) return;
   lastPlanB = now;
   logOnce('[PLAN B] Force re-sync: request_state');
   socket.emit('request_state', { roomId });
@@ -265,6 +279,7 @@ socket.on('sync_state', data => {
     }
   }, 1700);
 });
+
 function emitSyncState() {
   if (!player) return;
   socket.emit('player_action', {
@@ -275,6 +290,21 @@ function emitSyncState() {
   logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
 }
 
+// Обработка перехода в background/foreground
+function onHidden() {
+  ignoreSyncEvent = true;
+}
+function onVisible() {
+  ignoreSyncEvent = false;
+  socket.emit('request_state', { roomId });
+  player.play().catch(() => {});
+}
+document.addEventListener('visibilitychange', () => {
+  document.hidden ? onHidden() : onVisible();
+});
+window.addEventListener('blur',  onHidden);
+window.addEventListener('focus', onVisible);
+
 // --- Видео-плеер + UI ---
 async function fetchRoom() {
   try {
@@ -284,6 +314,7 @@ async function fetchRoom() {
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
     backLink.href = `${movie.html}?id=${movie.id}`;
+
     if (window.Hls?.isSupported()) {
       const hls = new Hls();
       hls.loadSource(movie.videoUrl);
@@ -296,8 +327,10 @@ async function fetchRoom() {
       video.addEventListener('playing', hideSpinner);
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
-    } else throw new Error('HLS не поддерживается');
-    video.muted = true;
+    } else {
+      throw new Error('HLS не поддерживается');
+    }
+
     video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       setupSyncHandlers(video);
@@ -310,6 +343,7 @@ async function fetchRoom() {
     video.addEventListener('durationchange', () => {
       durationLabel.textContent = formatTime(player.duration || 0);
     });
+
     setupCustomControls();
     showSpinner();
     logOnce('[player] инициализирован');
@@ -322,6 +356,7 @@ async function fetchRoom() {
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
+    isUserAction = true;
     if (player.paused) player.play();
     else player.pause();
   });
@@ -345,18 +380,14 @@ function setupCustomControls() {
     emitSyncState();
   });
 
-  player.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
-  player.addEventListener('pause',  () => {
-    // Критично: теперь не отправляем pause на сервер если страница была скрыта!
-    if (!ignoreSyncEvent) {
-      if (mobileAutoplayPauseBug || pageHidden) {
-        mobileAutoplayPauseBug = false;
-        logOnce('[MOBILE] Autopause after sync or hide, NOT sending!');
-        updatePlayIcon();
-        return;
-      }
-      emitSyncState();
-    }
+  player.addEventListener('play', () => {
+    if (!ignoreSyncEvent && isUserAction) emitSyncState();
+    isUserAction = false;
+    updatePlayIcon();
+  });
+  player.addEventListener('pause', () => {
+    if (!ignoreSyncEvent && isUserAction) emitSyncState();
+    isUserAction = false;
     updatePlayIcon();
   });
   player.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
@@ -367,12 +398,12 @@ function setupCustomControls() {
 }
 
 function setupSyncHandlers(v) {
-  v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
-  v.addEventListener('pause',  () => {
+  v.addEventListener('play', () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('pause', () => {
     if (!ignoreSyncEvent) {
-      if (mobileAutoplayPauseBug || pageHidden) {
+      if (mobileAutoplayPauseBug) {
         mobileAutoplayPauseBug = false;
-        logOnce('[MOBILE] Autopause after sync or hide, NOT sending!');
+        logOnce('[MOBILE] First pause after sync, NOT sending!');
         return;
       }
       emitSyncState();
@@ -421,6 +452,9 @@ function createSpinner() {
 // --- Формат времени ---
 function formatTime(t) {
   t = Math.floor(t || 0);
-  if (t >= 3600) return `${Math.floor(t/3600)}:${String(Math.floor((t%3600)/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
-  else return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
+  if (t >= 3600) {
+    return `${Math.floor(t/3600)}:${String(Math.floor((t%3600)/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
+  } else {
+    return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
+  }
 }
