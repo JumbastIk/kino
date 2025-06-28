@@ -185,15 +185,12 @@ function updateMembersList() {
 }
 
 // --- СИНХРОНИЗАЦИЯ ---
-let mobileFirstSyncIgnorePause = false;
+let mobileAutoplayPauseBug = false;
 let firstSyncDone = false;
-
-function isMobile() {
-  return /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|Mobile/i.test(navigator.userAgent);
-}
 
 function applySyncState(data) {
   if (!metadataReady || !player) return;
+  // Гарантируем mute всегда при синхронизации — это критично для autoplay на мобилах!
   if (!player.muted) player.muted = true;
 
   const now = Date.now();
@@ -205,34 +202,9 @@ function applySyncState(data) {
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
-
-  // --- Ключевая логика: ---
-  if (!firstSyncDone && isMobile()) {
-    // Только первый sync на мобиле, не делаем паузу даже если data.is_paused
-    if (!data.is_paused && player.paused) {
-      ignoreSyncEvent = true;
-      player.play().then(() => {
-        setTimeout(() => { ignoreSyncEvent = false; }, 150);
-        logOnce('[MOBILE] First sync play');
-      }).catch(() => { ignoreSyncEvent = false; });
-    }
-    firstSyncDone = true;
-    lastSyncApply = Date.now();
-    syncProblemDetected = false;
-    if (syncErrorTimeout) {
-      clearTimeout(syncErrorTimeout);
-      syncErrorTimeout = null;
-    }
-    updateProgressBar();
-    if (!readyForControl) {
-      readyForControl = true;
-      enableControls();
-      hideSpinner();
-    }
-    return;
-  }
-
-  // Обычное поведение для всех остальных случаев
+  // КОСТЫЛЬ ДЛЯ МОБИЛ: если после sync мы попробуем play — может сразу прилететь pause,
+  // мы ставим "флаг", чтобы НЕ отправлять этот первый pause как sync
+  if (!firstSyncDone) mobileAutoplayPauseBug = true;
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
     player.pause();
@@ -259,6 +231,7 @@ function applySyncState(data) {
     readyForControl = true;
     enableControls();
     hideSpinner();
+    firstSyncDone = true;
   }
 }
 
@@ -363,7 +336,19 @@ function setupCustomControls() {
   });
 
   player.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
-  player.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
+  player.addEventListener('pause',  () => {
+    // <<== Вот тут не отправляем pause если это был автопауза после sync на мобиле
+    if (!ignoreSyncEvent) {
+      if (mobileAutoplayPauseBug) {
+        mobileAutoplayPauseBug = false;
+        logOnce('[MOBILE] First pause after sync, NOT sending!');
+        updatePlayIcon();
+        return;
+      }
+      emitSyncState();
+    }
+    updatePlayIcon();
+  });
   player.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
   player.addEventListener('volumechange', updateMuteIcon);
 
@@ -373,7 +358,16 @@ function setupCustomControls() {
 
 function setupSyncHandlers(v) {
   v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
-  v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('pause',  () => {
+    if (!ignoreSyncEvent) {
+      if (mobileAutoplayPauseBug) {
+        mobileAutoplayPauseBug = false;
+        logOnce('[MOBILE] First pause after sync, NOT sending!');
+        return;
+      }
+      emitSyncState();
+    }
+  });
   v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
   v.addEventListener('error',  () => planB_RequestServerState());
   v.addEventListener('stalled',() => planB_RequestServerState());
