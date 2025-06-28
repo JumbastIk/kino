@@ -50,6 +50,20 @@ let allMembers = [];
 let userTimeMap = {};
 let userPingMap = {};
 
+// Флаги для предотвращения автопаузы от ОС/браузера
+let mobileAutoplayPauseBug = false;
+let firstSyncDone = false;
+let pageHidden = false;
+
+// === visibilitychange: определяем свернута ли страница/приложение ===
+document.addEventListener('visibilitychange', function() {
+  pageHidden = (document.visibilityState === 'hidden');
+  if (!pageHidden) {
+    // При возвращении просто запросить sync с сервера (не отправляем pause)
+    socket.emit('request_state', { roomId });
+  }
+});
+
 // Контролы неактивны до sync
 disableControls();
 function enableControls() {
@@ -185,12 +199,9 @@ function updateMembersList() {
 }
 
 // --- СИНХРОНИЗАЦИЯ ---
-let mobileAutoplayPauseBug = false;
-let firstSyncDone = false;
-
 function applySyncState(data) {
   if (!metadataReady || !player) return;
-  // Гарантируем mute всегда при синхронизации — это критично для autoplay на мобилах!
+  // mute всегда для autoplay на мобилах
   if (!player.muted) player.muted = true;
 
   const now = Date.now();
@@ -202,8 +213,7 @@ function applySyncState(data) {
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
-  // КОСТЫЛЬ ДЛЯ МОБИЛ: если после sync мы попробуем play — может сразу прилететь pause,
-  // мы ставим "флаг", чтобы НЕ отправлять этот первый pause как sync
+  // костыль: только первая sync — не отправлять pause на мобиле
   if (!firstSyncDone) mobileAutoplayPauseBug = true;
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
@@ -337,11 +347,11 @@ function setupCustomControls() {
 
   player.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
   player.addEventListener('pause',  () => {
-    // <<== Вот тут не отправляем pause если это был автопауза после sync на мобиле
+    // Критично: теперь не отправляем pause на сервер если страница была скрыта!
     if (!ignoreSyncEvent) {
-      if (mobileAutoplayPauseBug) {
+      if (mobileAutoplayPauseBug || pageHidden) {
         mobileAutoplayPauseBug = false;
-        logOnce('[MOBILE] First pause after sync, NOT sending!');
+        logOnce('[MOBILE] Autopause after sync or hide, NOT sending!');
         updatePlayIcon();
         return;
       }
@@ -360,9 +370,9 @@ function setupSyncHandlers(v) {
   v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
   v.addEventListener('pause',  () => {
     if (!ignoreSyncEvent) {
-      if (mobileAutoplayPauseBug) {
+      if (mobileAutoplayPauseBug || pageHidden) {
         mobileAutoplayPauseBug = false;
-        logOnce('[MOBILE] First pause after sync, NOT sending!');
+        logOnce('[MOBILE] Autopause after sync or hide, NOT sending!');
         return;
       }
       emitSyncState();
