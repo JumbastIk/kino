@@ -51,6 +51,34 @@ let allMembers = [];
 let userTimeMap = {};
 let userPingMap = {};
 
+// Overlay для автозапуска
+let userInteracted = false;
+let initialSyncDone = false;
+const overlay = document.createElement('div');
+overlay.style = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.88);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;font-family:sans-serif;';
+overlay.innerHTML = `
+  <div style="text-align:center;">
+    <div style="font-size:32px;margin-bottom:14px;">▶️ Начать просмотр</div>
+    <div>Для запуска синхронного просмотра<br>нажмите в любом месте</div>
+  </div>
+`;
+overlay.onclick = () => {
+  userInteracted = true;
+  overlay.style.display = 'none';
+  if (player.paused) player.play();
+};
+document.body.appendChild(overlay);
+overlay.style.display = 'none';
+
+// Вешаем событие на любое взаимодействие (клик/тап/клавиатура)
+['pointerdown','keydown','touchstart'].forEach(ev => {
+  document.body.addEventListener(ev, () => {
+    userInteracted = true;
+    overlay.style.display = 'none';
+    if (player.paused && initialSyncDone) player.play();
+  });
+});
+
 // Контролы неактивны до sync
 disableControls();
 function enableControls() {
@@ -140,13 +168,11 @@ socket.on('connect', () => {
   myUserId = socket.id;
   log(`[connect] id=${myUserId}`);
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
-  // ОБЯЗАТЕЛЬНО: сразу после коннекта спрашиваем sync_state у сервера!
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
 socket.on('reconnect', () => {
   log('[reconnect]');
-  // ОБЯЗАТЕЛЬНО: всегда сразу request_state при reconnect!
   socket.emit('request_state', { roomId });
 });
 socket.on('members', ms => {
@@ -184,13 +210,13 @@ function updateMembersList() {
 }
 
 // --- СИНХРОНИЗАЦИЯ ---
-// Главный принцип: ВСЕГДА брать sync_state только с сервера!
+// КЛЮЧ: после reload, если браузер не даёт автозапуск — показываем overlay
 function applySyncState(data) {
   if (!metadataReady || !player) return;
+  initialSyncDone = true;
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
-  // Не важно кто инициатор, ВСЕГДА доверяем серверу
   if (Math.abs(player.currentTime - target) > 0.5) {
     ignoreSyncEvent = true;
     player.currentTime = target;
@@ -204,11 +230,18 @@ function applySyncState(data) {
     logOnce('[SYNC] pause');
   }
   if (!data.is_paused && player.paused) {
-    ignoreSyncEvent = true;
-    player.play().then(() => {
-      setTimeout(() => { ignoreSyncEvent = false; }, 150);
-      logOnce('[SYNC] play');
-    }).catch(() => { ignoreSyncEvent = false; });
+    if (userInteracted || document.hasFocus()) {
+      ignoreSyncEvent = true;
+      player.play().then(() => {
+        setTimeout(() => { ignoreSyncEvent = false; }, 150);
+        logOnce('[SYNC] play');
+      }).catch(() => {
+        ignoreSyncEvent = false;
+        overlay.style.display = 'flex';
+      });
+    } else {
+      overlay.style.display = 'flex';
+    }
   }
   lastSyncApply = Date.now();
   syncProblemDetected = false;
@@ -217,7 +250,7 @@ function applySyncState(data) {
     syncErrorTimeout = null;
   }
   updateProgressBar();
-  readyForControl = true;     // ВСЕГДА разрешаем управление после sync_state
+  readyForControl = true;
   enableControls();
   hideSpinner();
 }
@@ -226,7 +259,7 @@ function applySyncState(data) {
 let lastPlanB = 0;
 function planB_RequestServerState() {
   const now = Date.now();
-  if (now - lastPlanB < 4000) return; // Не чаще, чем раз в 4 сек
+  if (now - lastPlanB < 4000) return;
   lastPlanB = now;
   logOnce('[PLAN B] Force re-sync: request_state');
   socket.emit('request_state', { roomId });
@@ -244,7 +277,6 @@ socket.on('sync_state', data => {
 });
 function emitSyncState() {
   if (!player) return;
-  // Любое действие пользователя — только запрос серверу!
   socket.emit('player_action', {
     roomId,
     position: player.currentTime,
@@ -279,7 +311,6 @@ async function fetchRoom() {
       metadataReady = true;
       setupSyncHandlers(video);
       player = video;
-      // Важно: после загрузки метаданных сразу просим sync_state у сервера
       socket.emit('request_state', { roomId });
       durationLabel.textContent = formatTime(player.duration || 0);
       logOnce('[player] loadedmetadata');
@@ -300,7 +331,6 @@ async function fetchRoom() {
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
-    // Только запрос серверу — изменение произойдёт только после sync_state!
     if (player.paused) player.play();
     else player.pause();
   });
