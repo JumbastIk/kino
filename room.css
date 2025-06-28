@@ -32,10 +32,7 @@ button, select {
   transition: color 0.18s, background 0.2s, box-shadow 0.18s;
   backdrop-filter: blur(10px);
 }
-.back-link:hover {
-  color: #e2b6ff;
-  background: rgba(90,70,170,0.16);
-}
+.back-link:hover { color: #e2b6ff; background: rgba(90,70,170,0.16); }
 
 /* ===== Мини-пинг ===== */
 .room-ping-mini {
@@ -121,10 +118,6 @@ button, select {
   border-bottom-left-radius: 20px;
   border-bottom-right-radius: 20px;
   backdrop-filter: blur(13px);
-  flex-wrap: nowrap;
-}
-.custom-video-controls:hover {
-  opacity: 1;
 }
 .custom-btn {
   background: none;
@@ -154,24 +147,10 @@ button, select {
   color: #a970ff;
   box-shadow: 0 3px 12px #a970ff1a;
 }
-.custom-btn:active {
-  background: rgba(70,36,146,0.13);
-  color: #fff;
-  transform: scale(0.95);
-}
-#fullscreenBtn {
-  font-size: 20px;
-}
-.chat-toggle-btn {
-  margin-left: 14px;
-  font-size: 23px;
-  background: #a970ff14;
-  color: #a970ff;
-}
-.chat-toggle-btn:hover {
-  background: #a970ff33;
-  color: #fff;
-}
+.custom-btn:active { background: rgba(70,36,146,0.13); color: #fff; transform: scale(0.95); }
+#fullscreenBtn { font-size: 20px; }
+.chat-toggle-btn { margin-left: 14px; font-size: 23px; background: #a970ff14; color: #a970ff; }
+.chat-toggle-btn:hover { background: #a970ff33; color: #fff; }
 
 /* ===== Прогресс-бар ===== */
 .custom-progress-container {
@@ -255,8 +234,6 @@ button, select {
 .custom-progress-slider:focus {
   outline: none;
 }
-
-/* ===== Время ===== */
 .custom-time {
   font-family: 'JetBrains Mono', 'Menlo', monospace;
   font-size: 16px;
@@ -328,10 +305,7 @@ button, select {
   font-weight: 600;
   transition: background 0.16s, color 0.14s;
 }
-#copyRoomId:hover {
-  background: #a970ff;
-  color: #fff;
-}
+#copyRoomId:hover { background: #a970ff; color: #fff; }
 
 /* ===== Секция участников ===== */
 .room-members-section {
@@ -372,9 +346,7 @@ button, select {
   font-family: 'Inter', 'JetBrains Mono', 'Menlo', monospace;
   letter-spacing: 0.01em;
 }
-.members-list li:last-child {
-  border-bottom: none;
-}
+.members-list li:last-child { border-bottom: none; }
 .member-name {
   color: #f7f7fc;
   font-weight: 500;
@@ -383,6 +355,7 @@ button, select {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1 1 auto;
+  font-size: 15px;
 }
 .member-time {
   color: #a970ff;
@@ -410,8 +383,6 @@ button, select {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  /* для корректного прилипания ввода */
-  padding-bottom: 0;
 }
 .chat-header-bottom {
   background: #23222e;
@@ -426,12 +397,7 @@ button, select {
   border: none;
   padding: 0;
 }
-.chat-container {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
+.chat-container { flex: 1 1 auto; display: flex; flex-direction: column; height: 100%; }
 .chat-messages {
   flex: 1 1 auto;
   padding: 14px 16px 5px 15px;
@@ -441,12 +407,8 @@ button, select {
   background: none;
   scroll-behavior: smooth;
   word-break: break-word;
-  margin-bottom: 0;
 }
-.chat-message {
-  margin-bottom: 12px;
-  padding: 5.5px 0;
-}
+.chat-message { margin-bottom: 12px; padding: 5.5px 0; }
 .system-message {
   text-align: center;
   color: #a296c2;
@@ -459,10 +421,6 @@ button, select {
   align-items: stretch;
   border-top: 1px solid #463b64;
   background: #231e37ea;
-  /* прилипает внизу */
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
 }
 .chat-input-wrap input {
   flex: 1;
@@ -476,9 +434,7 @@ button, select {
   transition: background 0.17s;
   border-radius: 0;
 }
-.chat-input-wrap input:focus {
-  background: #231f37;
-}
+.chat-input-wrap input:focus { background: #231f37; }
 .send-btn {
   padding: 0 23px;
   background: #a970ff;
@@ -491,13 +447,8 @@ button, select {
   transition: background 0.13s, color 0.14s, box-shadow 0.19s;
   box-shadow: 0 2px 11px #a970ff15;
 }
-.send-btn:hover {
-  background: #7f4ee3;
-  color: #fff;
-}
-.send-btn:active {
-  background: #5c33b1;
-}
+.send-btn:hover { background: #7f4ee3; color: #fff; }
+.send-btn:active { background: #5c33b1; }
 
 /* ===== Spinner (loader) ===== */
 .buffer-spinner {
@@ -534,53 +485,11 @@ button, select {
 
 /* ====== Мобильная адаптация ====== */
 @media (max-width: 950px) {
-  .player-chat-wrap {
-    flex-direction: column;
-    align-items: center;
-  }
-  .player-section {
-    width: 100vw;
-    max-width: none;
-  }
-  .player-wrapper {
-    width: 100vw;
-    max-width: 100vw;
-    border-radius: 0;
-  }
-  .room-id-center,
-  .room-members-section {
-    max-width: 99vw;
-    border-radius: 13px;
-    padding-left: 7px;
-    padding-right: 7px;
-  }
-  .chat-bottom {
-    max-width: 100vw;
-    border-radius: 0 0 17px 17px;
-  }
-  .room-ping-mini {
-    top: 8px;
-    right: 7px;
-    font-size: 13px;
-    padding: 5px 8px;
-    border-radius: 11px;
-    min-width: 40px;
-  }
-  .custom-video-controls {
-    /* разрешаем переносить элементы, уменьшаем отступы */
-    flex-wrap: wrap;
-    padding: 12px 6px 10px 6px;
-    gap: 8px;
-    border-radius: 0 0 18px 18px;
-  }
-  .custom-progress-container {
-    /* подгоняем ширину под экран */
-    flex: 1 1 100%;
-    max-width: calc(100% - 80px);
-    margin: 8px 0;
-  }
-  .custom-time {
-    font-size: 14px;
-    min-width: 50px;
-  }
+  .player-chat-wrap { flex-direction: column; align-items: center; }
+  .player-section { width: 100vw; max-width: none; }
+  .player-wrapper { width: 100vw; max-width: 100vw; border-radius: 0; }
+  .room-id-center, .room-members-section { max-width: 99vw; border-radius: 13px; padding-left: 7px; padding-right: 7px; }
+  .chat-bottom { max-width: 100vw; border-radius: 0 0 17px 17px; }
+  .room-ping-mini { top: 8px; right: 7px; font-size: 13px; padding: 5px 8px; border-radius: 11px; min-width: 40px; }
+  .custom-video-controls { border-radius: 0 0 18px 18px; padding: 17px 7px 11px 7px; }
 }
