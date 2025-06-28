@@ -43,7 +43,7 @@ if (copyRoomId) copyRoomId.onclick = () => {
 let player = video, spinner, lastPing = 0, myUserId = null;
 let metadataReady = false, lastSyncLog = 0;
 let ignoreSyncEvent = false, lastSyncApply = 0, syncProblemDetected = false, syncErrorTimeout = null;
-let readyForControl = false; // СТРОГО блокируем sync-action до первой синхронизации!
+let readyForControl = false;
 
 // ===== СТРУКТУРЫ для каждого участника =====
 let allMembers = [];
@@ -138,7 +138,7 @@ socket.on('user_time_update', data => {
 socket.on('connect', () => {
   myUserId = socket.id;
   log(`[connect] id=${myUserId}`);
-  readyForControl = false; // БЛОК управления!
+  readyForControl = false;
   disableControls();
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
@@ -146,7 +146,7 @@ socket.on('connect', () => {
 });
 socket.on('reconnect', () => {
   log('[reconnect]');
-  readyForControl = false; // БЛОК управления!
+  readyForControl = false;
   disableControls();
   socket.emit('request_state', { roomId });
 });
@@ -193,17 +193,12 @@ function applySyncState(data) {
   const now = Date.now();
   const timeSinceUpdate = (now - data.updatedAt) / 1000;
   const target = data.is_paused ? data.position : data.position + timeSinceUpdate;
-
-  // Не посылаем ничего до первой sync!
-  ignoreSyncEvent = true;
   if (Math.abs(player.currentTime - target) > 0.5) {
+    ignoreSyncEvent = true;
     player.currentTime = target;
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
-  } else {
-    setTimeout(() => { ignoreSyncEvent = false; }, 150);
   }
-
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
     player.pause();
@@ -217,9 +212,9 @@ function applySyncState(data) {
       logOnce('[SYNC] play');
     }).catch(() => {
       ignoreSyncEvent = false;
+      // Ничего не делаем — просто повторит попытку на след. sync_state
     });
   }
-
   lastSyncApply = Date.now();
   syncProblemDetected = false;
   if (syncErrorTimeout) {
@@ -227,8 +222,6 @@ function applySyncState(data) {
     syncErrorTimeout = null;
   }
   updateProgressBar();
-
-  // Теперь только после первого sync можно управлять!
   if (!readyForControl) {
     readyForControl = true;
     enableControls();
@@ -257,8 +250,7 @@ socket.on('sync_state', data => {
   }, 1700);
 });
 function emitSyncState() {
-  // Не отправляем sync, если не получили sync_state!
-  if (!player || !readyForControl) return;
+  if (!player) return;
   socket.emit('player_action', {
     roomId,
     position: player.currentTime,
@@ -289,6 +281,7 @@ async function fetchRoom() {
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
+    // *** КРИТИЧНО: mute до любого play, и только после loadedmetadata делаем sync ***
     video.muted = true;
     video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
@@ -337,9 +330,9 @@ function setupCustomControls() {
     emitSyncState();
   });
 
-  player.addEventListener('play',   () => { if (!ignoreSyncEvent && readyForControl) emitSyncState(); updatePlayIcon(); });
-  player.addEventListener('pause',  () => { if (!ignoreSyncEvent && readyForControl) emitSyncState(); updatePlayIcon(); });
-  player.addEventListener('seeked', () => { if (!ignoreSyncEvent && readyForControl) emitSyncState(); });
+  player.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
+  player.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
+  player.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
   player.addEventListener('volumechange', updateMuteIcon);
 
   updatePlayIcon();
@@ -347,9 +340,9 @@ function setupCustomControls() {
 }
 
 function setupSyncHandlers(v) {
-  v.addEventListener('play',   () => { if (!ignoreSyncEvent && readyForControl) emitSyncState(); });
-  v.addEventListener('pause',  () => { if (!ignoreSyncEvent && readyForControl) emitSyncState(); });
-  v.addEventListener('seeked', () => { if (!ignoreSyncEvent && readyForControl) emitSyncState(); });
+  v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
   v.addEventListener('error',  () => planB_RequestServerState());
   v.addEventListener('stalled',() => planB_RequestServerState());
 }
