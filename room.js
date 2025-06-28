@@ -185,6 +185,9 @@ function updateMembersList() {
 }
 
 // --- СИНХРОНИЗАЦИЯ ---
+let mobileAutoplayPauseBug = false;
+let firstSyncDone = false;
+
 function applySyncState(data) {
   if (!metadataReady || !player) return;
   // Гарантируем mute всегда при синхронизации — это критично для autoplay на мобилах!
@@ -199,6 +202,9 @@ function applySyncState(data) {
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
     logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
   }
+  // КОСТЫЛЬ ДЛЯ МОБИЛ: если после sync мы попробуем play — может сразу прилететь pause,
+  // мы ставим "флаг", чтобы НЕ отправлять этот первый pause как sync
+  if (!firstSyncDone) mobileAutoplayPauseBug = true;
   if (data.is_paused && !player.paused) {
     ignoreSyncEvent = true;
     player.pause();
@@ -212,7 +218,6 @@ function applySyncState(data) {
       logOnce('[SYNC] play');
     }).catch(() => {
       ignoreSyncEvent = false;
-      // Ничего не делаем — просто повторит попытку на след. sync_state
     });
   }
   lastSyncApply = Date.now();
@@ -226,6 +231,7 @@ function applySyncState(data) {
     readyForControl = true;
     enableControls();
     hideSpinner();
+    firstSyncDone = true;
   }
 }
 
@@ -281,7 +287,6 @@ async function fetchRoom() {
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
     } else throw new Error('HLS не поддерживается');
-    // *** КРИТИЧНО: mute до любого play, и только после loadedmetadata делаем sync ***
     video.muted = true;
     video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
@@ -331,7 +336,19 @@ function setupCustomControls() {
   });
 
   player.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
-  player.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); updatePlayIcon(); });
+  player.addEventListener('pause',  () => {
+    // <<== Вот тут не отправляем pause если это был автопауза после sync на мобиле
+    if (!ignoreSyncEvent) {
+      if (mobileAutoplayPauseBug) {
+        mobileAutoplayPauseBug = false;
+        logOnce('[MOBILE] First pause after sync, NOT sending!');
+        updatePlayIcon();
+        return;
+      }
+      emitSyncState();
+    }
+    updatePlayIcon();
+  });
   player.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
   player.addEventListener('volumechange', updateMuteIcon);
 
@@ -341,7 +358,16 @@ function setupCustomControls() {
 
 function setupSyncHandlers(v) {
   v.addEventListener('play',   () => { if (!ignoreSyncEvent) emitSyncState(); });
-  v.addEventListener('pause',  () => { if (!ignoreSyncEvent) emitSyncState(); });
+  v.addEventListener('pause',  () => {
+    if (!ignoreSyncEvent) {
+      if (mobileAutoplayPauseBug) {
+        mobileAutoplayPauseBug = false;
+        logOnce('[MOBILE] First pause after sync, NOT sending!');
+        return;
+      }
+      emitSyncState();
+    }
+  });
   v.addEventListener('seeked', () => { if (!ignoreSyncEvent) emitSyncState(); });
   v.addEventListener('error',  () => planB_RequestServerState());
   v.addEventListener('stalled',() => planB_RequestServerState());
