@@ -13,26 +13,26 @@ if (!roomId) {
 }
 
 // DOM elements
-const playerWrapper = document.getElementById('playerWrapper');
-const video = document.getElementById('videoPlayer');
-const playPauseBtn = document.getElementById('playPauseBtn');
-const muteBtn = document.getElementById('muteBtn');
-const fullscreenBtn = document.getElementById('fullscreenBtn');
-const openChatBtn = document.getElementById('openChatBtn');
+const playerWrapper   = document.getElementById('playerWrapper');
+const video           = document.getElementById('videoPlayer');
+const playPauseBtn    = document.getElementById('playPauseBtn');
+const muteBtn         = document.getElementById('muteBtn');
+const fullscreenBtn   = document.getElementById('fullscreenBtn');
+// const openChatBtn   = document.getElementById('openChatBtn'); // убрано
 const progressContainer = document.getElementById('progressContainer');
-const progressBar = document.getElementById('progressBar');
-const currentTimeLabel = document.getElementById('currentTimeLabel');
-const durationLabel = document.getElementById('durationLabel');
-const chatSidebar = document.getElementById('chatSidebar');
-const closeChatBtn = document.getElementById('closeChatBtn');
-const chatBottom = document.getElementById('chatBottom');
-const messagesBox = document.getElementById('messages');
-const membersList = document.getElementById('membersList');
-const msgInput = document.getElementById('msgInput');
-const sendBtn = document.getElementById('sendBtn');
-const backLink = document.getElementById('backLink');
-const roomIdCode = document.getElementById('roomIdCode');
-const copyRoomId = document.getElementById('copyRoomId');
+const progressBar       = document.getElementById('progressBar');
+const currentTimeLabel  = document.getElementById('currentTimeLabel');
+const durationLabel     = document.getElementById('durationLabel');
+const chatSidebar       = document.getElementById('chatSidebar');
+const closeChatBtn      = document.getElementById('closeChatBtn');
+const chatBottom        = document.getElementById('chatBottom');
+const messagesBox       = document.getElementById('messages');
+const membersList       = document.getElementById('membersList');
+const msgInput          = document.getElementById('msgInput');
+const sendBtn           = document.getElementById('sendBtn');
+const backLink          = document.getElementById('backLink');
+const roomIdCode        = document.getElementById('roomIdCode');
+const copyRoomId        = document.getElementById('copyRoomId');
 
 // Верно показываем id комнаты сразу при загрузке
 if (roomIdCode) roomIdCode.textContent = roomId;
@@ -54,28 +54,24 @@ let userPingMap = {};
 // Контролы неактивны до sync
 disableControls();
 function enableControls() {
-  playPauseBtn.style.pointerEvents = '';
-  muteBtn.style.pointerEvents = '';
-  fullscreenBtn.style.pointerEvents = '';
-  openChatBtn.style.pointerEvents = '';
+  playPauseBtn.style.pointerEvents     = '';
+  muteBtn.style.pointerEvents          = '';
+  fullscreenBtn.style.pointerEvents    = '';
   progressContainer.style.pointerEvents = '';
-  playPauseBtn.style.opacity = '';
-  muteBtn.style.opacity = '';
-  fullscreenBtn.style.opacity = '';
-  openChatBtn.style.opacity = '';
-  progressContainer.style.opacity = '';
+  playPauseBtn.style.opacity           = '';
+  muteBtn.style.opacity                = '';
+  fullscreenBtn.style.opacity          = '';
+  progressContainer.style.opacity      = '';
 }
 function disableControls() {
-  playPauseBtn.style.pointerEvents = 'none';
-  muteBtn.style.pointerEvents = 'none';
-  fullscreenBtn.style.pointerEvents = 'none';
-  openChatBtn.style.pointerEvents = 'none';
+  playPauseBtn.style.pointerEvents     = 'none';
+  muteBtn.style.pointerEvents          = 'none';
+  fullscreenBtn.style.pointerEvents    = 'none';
   progressContainer.style.pointerEvents = 'none';
-  playPauseBtn.style.opacity = '.6';
-  muteBtn.style.opacity = '.6';
-  fullscreenBtn.style.opacity = '.6';
-  openChatBtn.style.opacity = '.6';
-  progressContainer.style.opacity = '.6';
+  playPauseBtn.style.opacity           = '.6';
+  muteBtn.style.opacity                = '.6';
+  fullscreenBtn.style.opacity          = '.6';
+  progressContainer.style.opacity      = '.6';
 }
 
 // --- ЧАТ (упрощён, без сайдбара!) ---
@@ -112,7 +108,7 @@ function logOnce(msg) {
 }
 function log(msg) { console.log(msg); }
 
-// --- Пинг и время для всех участников (ТОЛЬКО ЭТО ДОБАВЛЕНО!) ---
+// --- Пинг и время для всех участников ---
 function measurePingAndSend() {
   if (!player || !myUserId) return;
   const t0 = Date.now();
@@ -185,7 +181,7 @@ function updateMembersList() {
       .join('');
 }
 
-// --- СИНХРОНИЗАЦИЯ --- //
+// --- СИНХРОНИЗАЦИЯ ---
 function applySyncState(data) {
   if (!metadataReady || !player) return;
   const now = Date.now();
@@ -246,7 +242,7 @@ function emitSyncState() {
   logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
 }
 
-// --- Видео-плеер + UI --- //
+// --- Видео-плеер + UI ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
