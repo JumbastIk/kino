@@ -46,8 +46,8 @@ let ignoreSyncEvent   = false, syncErrorTimeout = null;
 let readyForControl   = false;
 let isUserAction      = false;  // только реальные клики отключают паузы
 
-// Добавлено: флаг для пропуска первой автопаузы при подключении
-let skipFirstPause    = false;
+// **Добавлено: флаг, чтобы игнорировать паузу при входе нового участника**
+let skipPauseOnJoin = false;
 
 // структуры участников
 let allMembers  = [];
@@ -146,10 +146,6 @@ socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;
   disableControls();
-
-  // Добавлено: при подключении пропускаем первую автопаузу
-  skipFirstPause = true;
-
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
@@ -160,6 +156,8 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 socket.on('members', ms => {
+  // **При входе нового участника пропустить паузу в следующем sync_state**
+  skipPauseOnJoin = true;
   allMembers = ms;
   updateMembersList();
 });
@@ -192,6 +190,13 @@ let firstSyncDone         = false;
 
 function applySyncState(data) {
   if (!metadataReady || !player) return;
+
+  // **Если пауза вызвана входом нового участника, сбросить is_paused**
+  if (skipPauseOnJoin) {
+    data.is_paused = false;
+    skipPauseOnJoin = false;
+  }
+
   if (!player.muted) player.muted = true;
 
   const now    = Date.now();
@@ -340,12 +345,6 @@ function setupCustomControls() {
     updatePlayIcon();
   });
   player.addEventListener('pause', ()=>{
-    // Добавлено: пропустить первую автопаузу после connect
-    if (skipFirstPause) {
-      skipFirstPause = false;
-      updatePlayIcon();
-      return;
-    }
     if (!ignoreSyncEvent && isUserAction) emitSyncState();
     isUserAction = false;
     updatePlayIcon();
