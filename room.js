@@ -218,10 +218,17 @@ function applySyncState(data) {
     hideSpinner();
   }
 }
+
+// === ФИКС: защита от частого planB_RequestServerState ===
+let lastPlanB = 0;
 function planB_RequestServerState() {
+  const now = Date.now();
+  if (now - lastPlanB < 4000) return; // Не чаще, чем раз в 4 сек
+  lastPlanB = now;
   logOnce('[PLAN B] Force re-sync: request_state');
   socket.emit('request_state', { roomId });
 }
+
 socket.on('sync_state', data => {
   applySyncState(data);
   if (syncErrorTimeout) clearTimeout(syncErrorTimeout);
