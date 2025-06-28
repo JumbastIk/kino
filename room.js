@@ -46,6 +46,9 @@ let ignoreSyncEvent   = false, syncErrorTimeout = null;
 let readyForControl   = false;
 let isUserAction      = false;  // только реальные клики отключают паузы
 
+// Добавлено: флаг для пропуска первой автопаузы при подключении
+let skipFirstPause    = false;
+
 // структуры участников
 let allMembers  = [];
 let userTimeMap = {};
@@ -143,6 +146,10 @@ socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;
   disableControls();
+
+  // Добавлено: при подключении пропускаем первую автопаузу
+  skipFirstPause = true;
+
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
@@ -333,6 +340,12 @@ function setupCustomControls() {
     updatePlayIcon();
   });
   player.addEventListener('pause', ()=>{
+    // Добавлено: пропустить первую автопаузу после connect
+    if (skipFirstPause) {
+      skipFirstPause = false;
+      updatePlayIcon();
+      return;
+    }
     if (!ignoreSyncEvent && isUserAction) emitSyncState();
     isUserAction = false;
     updatePlayIcon();
