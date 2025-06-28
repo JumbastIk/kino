@@ -119,6 +119,55 @@ button, select {
   border-bottom-right-radius: 20px;
   backdrop-filter: blur(13px);
 }
+#playPauseBtn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #9146FF 0%, #772CE8 100%);
+  color: #fff;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+#playPauseBtn:hover {
+  background: linear-gradient(135deg, #A079FF 0%, #8A5BFF 100%);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.35), 0 2px 4px rgba(0,0,0,0.25);
+}
+
+#playPauseBtn:active {
+  background: linear-gradient(135deg, #772CE8 0%, #5B22B3 100%);
+  transform: scale(0.92);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+#playPauseBtn:disabled {
+  background: #4e3a66;
+  box-shadow: none;
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* (опционально) индикатор буфера */
+#playPauseBtn.buffering::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.25);
+  border-radius: 4px;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#fullscreenBtn { font-size: 20px; }
+.chat-toggle-btn { margin-left: 14px; font-size: 23px; background: #a970ff14; color: #a970ff; }
+.chat-toggle-btn:hover { background: #a970ff33; color: #fff; }
 
 /* ===== Прогресс-бар ===== */
 .custom-progress-container {
@@ -522,68 +571,4 @@ button, select {
     font-size: 14px;
     min-width: 40px;
   }
-}
-
-/* ===== Twitch-style Play/Pause Button ===== */
-#playPauseBtn {
-  /* размер и форма */
-  width: 40px;
-  height: 40px;
-  border: none;
-  border-radius: 4px;
-  
-  /* фон – Twitch-градиент */
-  background: linear-gradient(135deg, #9146FF 0%, #772CE8 100%);
-  color: #ffffff;
-  font-size: 20px;
-  
-  /* центрируем содержимое */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  
-  /* тень для глубины */
-  box-shadow:
-    0 2px 6px rgba(0,0,0,0.3),
-    0 1px 2px rgba(0,0,0,0.2);
-  
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    transform 0.1s ease,
-    box-shadow 0.15s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-#playPauseBtn:hover {
-  background: linear-gradient(135deg, #A079FF 0%, #8A5BFF 100%);
-  box-shadow:
-    0 4px 12px rgba(0,0,0,0.35),
-    0 2px 4px rgba(0,0,0,0.25);
-}
-
-#playPauseBtn:active {
-  background: linear-gradient(135deg, #772CE8 0%, #5B22B3 100%);
-  transform: scale(0.92);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-}
-
-#playPauseBtn:disabled {
-  background: #4e3a66;
-  box-shadow: none;
-  cursor: default;
-  opacity: 0.6;
-}
-
-#playPauseBtn.buffering::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.25);
-  border-radius: 4px;
-  animation: spin 1s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
