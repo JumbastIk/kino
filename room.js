@@ -212,11 +212,10 @@ function applySyncState(data) {
     clearTimeout(syncErrorTimeout);
     syncErrorTimeout = null;
   }
-  if (!readyForControl) {
-    readyForControl = true;
-    enableControls();
-    hideSpinner();
-  }
+  updateProgressBar();        // ФИКС: всегда обновлять положение точки прогресса
+  readyForControl = true;     // ФИКС: всегда разрешать управление после sync
+  enableControls();
+  hideSpinner();
 }
 
 // === ФИКС: защита от частого planB_RequestServerState ===
