@@ -40,7 +40,7 @@ function shouldForceRecover(roomId) {
   return false;
 }
 function isSyncBlocked(roomId) {
-  return Date.now() < (syncBlockUntil[roomId] || 0);
+  return false; // <--- Фикс, теперь play/pause всегда разрешён
 }
 
 function scheduleBroadcast(io, roomId) {
@@ -58,7 +58,6 @@ function clearBroadcast(io, roomId) {
   if (!room || room.size === 0) {
     clearInterval(broadcastTimers[roomId]);
     delete broadcastTimers[roomId];
-    delete roomsState[roomId];
     delete syncLoopHistory[roomId];
     delete syncBlockUntil[roomId];
     console.log(`[Clear] Stopped broadcast timer and cleared state for room ${roomId}`);
@@ -151,7 +150,7 @@ module.exports = function (io) {
         }
 
         if (isSyncBlocked(roomId)) {
-          console.warn(`[SyncBlocked] room=${roomId} игнорируется sync для защиты от зацикливания`);
+          // Теперь всегда false, блокировка отключена!
           return;
         }
 
@@ -175,8 +174,6 @@ module.exports = function (io) {
           updatedAt: now
         };
 
-        // --- КЛЮЧЕВОЕ: убрано понятие "master" или "лидер" —
-        // --- любой участник теперь всегда может инициировать play/pause ---
         io.to(roomId).emit('sync_state', updateData);
 
       } catch (err) {
