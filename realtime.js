@@ -127,7 +127,7 @@ module.exports = function (io) {
 
     socket.on('ping', () => socket.emit('pong'));
 
-    // --- ГЛАВНЫЙ sync_state: любое действие пользователя рассылается всем!
+    // --- sync_state: любое действие пользователя рассылается всем! ---
     socket.on('player_action', ({ roomId, position, is_paused, speed }) => {
       try {
         // Если sync-loop, то форсим корректное состояние и блокируем излишние sync
@@ -175,6 +175,8 @@ module.exports = function (io) {
           updatedAt: now
         };
 
+        // --- КЛЮЧЕВОЕ: убрано понятие "master" или "лидер" —
+        // --- любой участник теперь всегда может инициировать play/pause ---
         io.to(roomId).emit('sync_state', updateData);
 
       } catch (err) {
@@ -201,7 +203,6 @@ module.exports = function (io) {
       }
     });
 
-    // ==== ВОТ ЭТО НОВОЕ СОБЫТИЕ ====
     socket.on('update_time', data => {
       // data = { roomId, user_id, currentTime, ping }
       io.to(data.roomId).emit('user_time_update', data);
