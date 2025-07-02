@@ -46,14 +46,11 @@ let metadataReady     = false;
 let lastSyncLog       = 0;
 let ignoreSyncEvent   = false, syncErrorTimeout = null;
 let readyForControl   = false;
-let isUserAction      = false; // только реальные клики отключают паузы
 
 // Флаг для пропуска первой автопаузы при подключении
 let skipFirstPause    = false;
-
 // Для visibilitychange
 let wasPausedOnHide   = true;
-
 // Участники
 let allMembers  = [];
 let userTimeMap = {};
@@ -153,10 +150,7 @@ socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;
   disableControls();
-
-  // Пропустить первую автопаузу
   skipFirstPause = true;
-
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
@@ -203,32 +197,36 @@ function jumpTo(target) {
 
 function syncPlayPause(paused) {
   ignoreSyncEvent = true;
-  if (paused) {
-    player.pause();
-  } else if (player.paused) {
-    player.play().catch(() => {});
-  }
+  if (paused) player.pause();
+  else if (player.paused) player.play().catch(() => {});
   setTimeout(() => { ignoreSyncEvent = false; }, 150);
 }
 
 // --- Синхронизация main ---
-let mobileAutoplayPauseBug = false;
-let firstSyncDone         = false;
+let firstSyncDone = false;
 
 function applySyncState(data) {
   if (!metadataReady) return;
   if (!player.muted) player.muted = true;
 
-  const now   = Date.now();
-  const delta = (now - data.updatedAt) / 1000;
-  const goal  = data.is_paused ? data.position : data.position + delta;
+  // 1) delta не негативная
+  let delta = (Date.now() - data.updatedAt) / 1000;
+  if (delta < 0) delta = 0;
 
-  if (Math.abs(player.currentTime - goal) > 0.5) {
-    jumpTo(goal);
+  // 2) сырой target
+  const raw = data.is_paused
+            ? data.position
+            : data.position + delta;
+
+  // 3) в [0, duration]
+  const duration = player.duration || Infinity;
+  const target = Math.min(Math.max(raw, 0), duration);
+
+  if (Math.abs(player.currentTime - target) > 0.5) {
+    jumpTo(target);
   }
 
   if (!firstSyncDone) {
-    mobileAutoplayPauseBug = true;
     firstSyncDone = true;
   }
 
@@ -260,14 +258,10 @@ socket.on('sync_state', data => {
 // Надёжная отправка player_action
 function emitSyncState() {
   if (!player) return;
-  socket.timeout(5000).emit('player_action', {
+  socket.emit('player_action', {
     roomId,
     position: player.currentTime,
     is_paused: player.paused
-  }, (err) => {
-    if (err) {
-      console.warn('Ошибка синхронизации действия:', err);
-    }
   });
   logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
 }
@@ -333,9 +327,10 @@ async function fetchRoom() {
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
-    isUserAction = true;
     if (player.paused) player.play();
-    else             player.pause();
+    else               player.pause();
+    // Сразу уведомляем сервер
+    emitSyncState();
   });
   muteBtn.addEventListener('click', () => {
     if (!readyForControl) return;
@@ -352,7 +347,6 @@ function setupCustomControls() {
 
   // SCRUBBING
   let wasPlaying = false;
-
   progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
   });
@@ -365,24 +359,8 @@ function setupCustomControls() {
     if (wasPlaying) player.play().catch(() => {});
   });
 
-  player.addEventListener('play', () => {
-    if (!ignoreSyncEvent && isUserAction) emitSyncState();
-    isUserAction = false;
-    updatePlayIcon();
-  });
-  player.addEventListener('pause', () => {
-    if (skipFirstPause) {
-      skipFirstPause = false;
-      updatePlayIcon();
-      return;
-    }
-    if (!ignoreSyncEvent && isUserAction) emitSyncState();
-    isUserAction = false;
-    updatePlayIcon();
-  });
-  player.addEventListener('seeked', () => {
-    if (!ignoreSyncEvent) emitSyncState();
-  });
+  player.addEventListener('play', updatePlayIcon);
+  player.addEventListener('pause', updatePlayIcon);
   player.addEventListener('volumechange', updateMuteIcon);
 }
 
