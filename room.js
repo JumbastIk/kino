@@ -18,7 +18,6 @@ const video             = document.getElementById('videoPlayer');
 const playPauseBtn      = document.getElementById('playPauseBtn');
 const muteBtn           = document.getElementById('muteBtn');
 const fullscreenBtn     = document.getElementById('fullscreenBtn');
-// Ползунок прогресса
 const progressSlider    = document.getElementById('progressSlider');
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
@@ -32,35 +31,32 @@ const backLink          = document.getElementById('backLink');
 const roomIdCode        = document.getElementById('roomIdCode');
 const copyRoomId        = document.getElementById('copyRoomId');
 
-// Показ ID комнаты
 if (roomIdCode) roomIdCode.textContent = roomId;
 if (copyRoomId) copyRoomId.onclick = () => {
   navigator.clipboard.writeText(roomId);
   alert('Скопировано!');
 };
 
-let player            = video,
-    spinner,
-    myUserId          = null;
-let metadataReady     = false;
-let lastSyncLog       = 0;
-let ignoreSyncEvent   = false, syncErrorTimeout = null;
-let readyForControl   = false;
+let player          = video;
+let spinner;
+let myUserId        = null;
+let metadataReady   = false;
+let lastSyncLog     = 0;
+let ignoreSyncEvent = false;
+let syncErrorTimeout;
+let readyForControl = false;
 
-// Для visibilitychange
-let wasPausedOnHide   = true;
-// Участники
-let allMembers  = [];
-let userTimeMap = {};
-let userPingMap = {};
+let wasPausedOnHide = true;
+let allMembers      = [];
+let userTimeMap     = {};
+let userPingMap     = {};
 
-// Telegram WebApp
+// Telegram WebApp hooks (если нужно)
 if (window.Telegram?.WebApp) {
   Telegram.WebApp.disableVerticalSwipes();
   Telegram.WebApp.enableClosingConfirmation();
 }
 
-// Inline-видео
 video.setAttribute('playsinline', '');
 video.setAttribute('webkit-playsinline', '');
 video.autoplay = true;
@@ -116,7 +112,7 @@ function logOnce(msg) {
   }
 }
 
-// Пинг
+// Пинг-замер
 function measurePingAndSend() {
   if (!player || !myUserId) return;
   const t0 = Date.now();
@@ -143,11 +139,12 @@ socket.on('user_time_update', data => {
   }
 });
 
-// --- Сокет-события ---
+// --- Socket.IO события ---
 socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;
   disableControls();
+
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
@@ -168,7 +165,7 @@ socket.on('history', data => {
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
 
-// Обновить список участников
+// Обновление списка участников
 function updateMembersList() {
   if (!Array.isArray(allMembers)) return;
   membersList.innerHTML = allMembers.map(m => {
@@ -184,11 +181,11 @@ function updateMembersList() {
   }).join('');
 }
 
-// --- Синхронизация helper'ы ---
+// --- Синхронизация вспомогательные ---
 function jumpTo(target) {
   ignoreSyncEvent = true;
-  // ждем хотя бы первого фрейма
-  if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+  // Если видео ещё не готово — ждём первого фрейма
+  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
       player.currentTime = target;
       player.removeEventListener('loadeddata', onLoaded);
@@ -201,45 +198,60 @@ function jumpTo(target) {
   }
   logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
 }
-
 function syncPlayPause(paused) {
   ignoreSyncEvent = true;
   if (paused) {
     player.pause();
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
   } else {
-    player.play().catch(()=>{}).finally(() => {
+    player.play().catch(() => {}).finally(() => {
       setTimeout(() => { ignoreSyncEvent = false; }, 150);
     });
   }
 }
 
-// --- Синхронизация main ---
+// --- Основная синхронизация ---
 let firstSyncDone = false;
+let lastPlanB     = 0;
+
+function planB_RequestServerState() {
+  const now = Date.now();
+  if (now - lastPlanB < 5000) return;   // троттлинг: не чаще 1×/5 с
+  lastPlanB = now;
+  socket.emit('request_state', { roomId });
+}
 
 function applySyncState(data) {
   if (!metadataReady) return;
   if (!player.muted) player.muted = true;
 
-  // корректируем delta
+  // 1) вычисляем «срезанную» delta
   let delta = (Date.now() - data.updatedAt) / 1000;
   if (delta < 0) delta = 0;
 
-  // считаем target
-  const raw = data.is_paused
-            ? data.position
-            : data.position + delta;
-  const duration = player.duration || Infinity;
-  const target   = Math.min(Math.max(raw, 0), duration);
+  // 2) целевая позиция
+  const raw    = data.is_paused
+               ? data.position
+               : data.position + delta;
+  const dur    = player.duration || Infinity;
+  const target = Math.min(Math.max(raw, 0), dur);
+  const diff   = target - player.currentTime;
 
-  if (Math.abs(player.currentTime - target) > 0.5) {
+  // 3) сначала корректируем скорость, потом (при большом рассинхроне) — джамп
+  if (Math.abs(diff) > 5) {
     jumpTo(target);
+  } else if (Math.abs(diff) > 0.5) {
+    ignoreSyncEvent = true;
+    // подгоняем скорость на короткий промежуток
+    player.playbackRate = 1 + diff * 0.1;
+    setTimeout(() => {
+      player.playbackRate = 1;
+      ignoreSyncEvent = false;
+    }, 800);
+    logOnce(`[SYNC] SLOW ADJUST by ${diff.toFixed(2)}s`);
   }
 
-  if (!firstSyncDone) {
-    firstSyncDone = true;
-  }
-
+  // 4) play/pause
   syncPlayPause(data.is_paused);
 
   updateProgressBar();
@@ -247,25 +259,18 @@ function applySyncState(data) {
   enableControls();
 }
 
-let lastPlanB = 0;
-function planB_RequestServerState() {
-  const now = Date.now();
-  if (now - lastPlanB < 4000) return;
-  lastPlanB = now;
-  socket.emit('request_state', { roomId });
-}
-
 socket.on('sync_state', data => {
   applySyncState(data);
   clearTimeout(syncErrorTimeout);
   syncErrorTimeout = setTimeout(() => {
+    // если сервер молчит дольше 1.6 с, шлём Plan B
     if (Date.now() - data.updatedAt > 1600) {
       planB_RequestServerState();
     }
   }, 1700);
 });
 
-// Надёжная отправка player_action
+// надёжная отправка player_action
 function emitSyncState() {
   if (!player) return;
   socket.emit('player_action', {
@@ -284,13 +289,11 @@ document.addEventListener('visibilitychange', () => {
   } else {
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
-    if (!wasPausedOnHide) {
-      player.play().catch(() => {});
-    }
+    if (!wasPausedOnHide) player.play().catch(() => {});
   }
 });
 
-// --- Видео + UI ---
+// --- Загрузка и инициализация видео ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -327,12 +330,14 @@ async function fetchRoom() {
 
     setupCustomControls();
     showSpinner();
+
   } catch (err) {
     console.error(err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
+// --- Кастомные контролы и scrubber ---
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
@@ -353,7 +358,6 @@ function setupCustomControls() {
     fn && fn.call(player);
   });
 
-  // SCRUBBING
   let wasPlaying = false;
   progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
