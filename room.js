@@ -75,7 +75,6 @@ function enableControls() {
     el.style.pointerEvents = '';
     el.style.opacity       = '';
   });
-  // добавляем доступ к ползунку
   progressSlider.disabled = false;
 }
 function disableControls() {
@@ -295,7 +294,6 @@ async function fetchRoom() {
     video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       player = video;
-      // Сбрасываем флаг пропуска паузы после того как видео готово
       skipFirstPause = false;
       socket.emit('request_state', { roomId });
       durationLabel.textContent = formatTime(player.duration || 0);
@@ -334,15 +332,11 @@ function setupCustomControls() {
     fn && fn.call(player);
   });
 
-  // УБРАН old click handler:
-  // progressContainer.removeEventListener('click', ...);
-
   // -------- SCRUBBING (перетаскивание) --------
-  let isSeeking = false;
+  let wasPlaying = false;
 
   progressSlider.addEventListener('mousedown', () => {
-    isSeeking = true;
-    player.pause();
+    wasPlaying = !player.paused;
   });
 
   progressSlider.addEventListener('input', () => {
@@ -351,9 +345,10 @@ function setupCustomControls() {
   });
 
   progressSlider.addEventListener('mouseup', () => {
-    isSeeking = false;
     emitSyncState();
-    if (!player.paused) player.play().catch(()=>{});
+    if (wasPlaying) {
+      player.play().catch(()=>{});
+    }
   });
 
   player.addEventListener('play', ()=>{
@@ -362,7 +357,6 @@ function setupCustomControls() {
     updatePlayIcon();
   });
   player.addEventListener('pause', ()=>{
-    // Пропустить первую автопаузу после connect
     if (skipFirstPause) {
       skipFirstPause = false;
       updatePlayIcon();
@@ -380,8 +374,7 @@ function updateProgressBar() {
   if (!player.duration) return;
   const pct = (player.currentTime / player.duration) * 100;
   progressBar.style.width = pct + '%';
-  // Добавлено: синхронизация ползунка
-  progressSlider.value = pct;
+  progressSlider.value    = pct;
   currentTimeLabel.textContent = formatTime(player.currentTime);
 }
 
