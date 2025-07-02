@@ -18,7 +18,7 @@ const video             = document.getElementById('videoPlayer');
 const playPauseBtn      = document.getElementById('playPauseBtn');
 const muteBtn           = document.getElementById('muteBtn');
 const fullscreenBtn     = document.getElementById('fullscreenBtn');
-// Добавлено: захват ползунка-прогресса
+// Ползунок прогресса
 const progressSlider    = document.getElementById('progressSlider');
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
@@ -32,7 +32,7 @@ const backLink          = document.getElementById('backLink');
 const roomIdCode        = document.getElementById('roomIdCode');
 const copyRoomId        = document.getElementById('copyRoomId');
 
-// Верно показываем id комнаты сразу при загрузке
+// Показ ID комнаты
 if (roomIdCode) roomIdCode.textContent = roomId;
 if (copyRoomId) copyRoomId.onclick = () => {
   navigator.clipboard.writeText(roomId);
@@ -46,29 +46,32 @@ let metadataReady     = false;
 let lastSyncLog       = 0;
 let ignoreSyncEvent   = false, syncErrorTimeout = null;
 let readyForControl   = false;
-let isUserAction      = false;  // только реальные клики отключают паузы
+let isUserAction      = false; // только реальные клики отключают паузы
 
-// Добавлено: флаг для пропуска первой автопаузы при подключении
+// Флаг для пропуска первой автопаузы при подключении
 let skipFirstPause    = false;
 
-// структуры участников
+// Для visibilitychange
+let wasPausedOnHide   = true;
+
+// Участники
 let allMembers  = [];
 let userTimeMap = {};
 let userPingMap = {};
 
-// Telegram WebApp: блокируем свайпы и подтверждение закрытия
+// Telegram WebApp
 if (window.Telegram?.WebApp) {
   Telegram.WebApp.disableVerticalSwipes();
   Telegram.WebApp.enableClosingConfirmation();
 }
 
-// Inline-видео на мобиле
+// Inline-видео
 video.setAttribute('playsinline', '');
 video.setAttribute('webkit-playsinline', '');
 video.autoplay = true;
 video.muted    = true;
 
-// контролы неактивны до sync
+// Контролы
 disableControls();
 function enableControls() {
   [playPauseBtn, muteBtn, fullscreenBtn, progressContainer].forEach(el => {
@@ -109,7 +112,7 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// логгер
+// Логгер
 function logOnce(msg) {
   const now = Date.now();
   if (now - lastSyncLog > 600) {
@@ -118,7 +121,7 @@ function logOnce(msg) {
   }
 }
 
-// пинг и время участников
+// Пинг
 function measurePingAndSend() {
   if (!player || !myUserId) return;
   const t0 = Date.now();
@@ -145,13 +148,13 @@ socket.on('user_time_update', data => {
   }
 });
 
-// socket.io события
+// --- Сокет-события ---
 socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;
   disableControls();
 
-  // При подключении пропускаем первую автопаузу
+  // Пропустить первую автопаузу
   skipFirstPause = true;
 
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
@@ -174,7 +177,7 @@ socket.on('history', data => {
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
 
-// обновляем список участников
+// Обновить список участников
 function updateMembersList() {
   if (!Array.isArray(allMembers)) return;
   membersList.innerHTML = allMembers.map(m => {
@@ -190,39 +193,47 @@ function updateMembersList() {
   }).join('');
 }
 
-// синхронизация
+// --- Синхронизация helper'ы ---
+function jumpTo(target) {
+  ignoreSyncEvent = true;
+  player.currentTime = target;
+  setTimeout(() => { ignoreSyncEvent = false; }, 150);
+  logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
+}
+
+function syncPlayPause(paused) {
+  ignoreSyncEvent = true;
+  if (paused) {
+    player.pause();
+  } else if (player.paused) {
+    player.play().catch(() => {});
+  }
+  setTimeout(() => { ignoreSyncEvent = false; }, 150);
+}
+
+// --- Синхронизация main ---
 let mobileAutoplayPauseBug = false;
 let firstSyncDone         = false;
 
 function applySyncState(data) {
-  if (!metadataReady || !player) return;
+  if (!metadataReady) return;
   if (!player.muted) player.muted = true;
 
-  const now    = Date.now();
-  const delta  = (now - data.updatedAt)/1000;
-  const target = data.is_paused ? data.position : data.position + delta;
+  const now   = Date.now();
+  const delta = (now - data.updatedAt) / 1000;
+  const goal  = data.is_paused ? data.position : data.position + delta;
 
-  if (Math.abs(player.currentTime - target) > 0.5) {
-    ignoreSyncEvent = true;
-    player.currentTime = target;
-    setTimeout(()=>{ ignoreSyncEvent = false; },150);
-    logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
+  if (Math.abs(player.currentTime - goal) > 0.5) {
+    jumpTo(goal);
   }
 
-  if (!firstSyncDone) mobileAutoplayPauseBug = true;
-  if (data.is_paused && !player.paused) {
-    ignoreSyncEvent = true;
-    player.pause();
-    setTimeout(()=>{ ignoreSyncEvent = false; },150);
-  }
-  if (!data.is_paused && player.paused) {
-    ignoreSyncEvent = true;
-    player.play().then(()=>{
-      setTimeout(()=>{ ignoreSyncEvent = false; },150);
-    }).catch(()=>{ ignoreSyncEvent = false; });
+  if (!firstSyncDone) {
+    mobileAutoplayPauseBug = true;
+    firstSyncDone = true;
   }
 
-  firstSyncDone = true;
+  syncPlayPause(data.is_paused);
+
   updateProgressBar();
   readyForControl = true;
   enableControls();
@@ -239,35 +250,43 @@ function planB_RequestServerState() {
 socket.on('sync_state', data => {
   applySyncState(data);
   clearTimeout(syncErrorTimeout);
-  syncErrorTimeout = setTimeout(()=>{
+  syncErrorTimeout = setTimeout(() => {
     if (Date.now() - data.updatedAt > 1600) {
       planB_RequestServerState();
     }
-  },1700);
+  }, 1700);
 });
 
+// Надёжная отправка player_action
 function emitSyncState() {
   if (!player) return;
-  socket.emit('player_action', {
+  socket.timeout(5000).emit('player_action', {
     roomId,
     position: player.currentTime,
     is_paused: player.paused
+  }, (err) => {
+    if (err) {
+      console.warn('Ошибка синхронизации действия:', err);
+    }
   });
+  logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
 }
 
-// блокировка экрана
+// --- Обработка visibilitychange ---
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    // видео WebView автоматически поставит паузу — игнорируем
+    wasPausedOnHide = player.paused;
     ignoreSyncEvent = true;
   } else {
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
-    player.play().catch(()=>{});
+    if (!wasPausedOnHide) {
+      player.play().catch(() => {});
+    }
   }
 });
 
-// видео-плеер + UI
+// --- Видео + UI ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -290,7 +309,6 @@ async function fetchRoom() {
       throw new Error('HLS не поддерживается');
     }
 
-    // Загрузка метаданных
     video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       player = video;
@@ -300,7 +318,7 @@ async function fetchRoom() {
     });
 
     video.addEventListener('timeupdate', updateProgressBar);
-    video.addEventListener('durationchange', ()=> {
+    video.addEventListener('durationchange', () => {
       durationLabel.textContent = formatTime(player.duration || 0);
     });
 
@@ -313,18 +331,18 @@ async function fetchRoom() {
 }
 
 function setupCustomControls() {
-  playPauseBtn.addEventListener('click', ()=>{
+  playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
     isUserAction = true;
     if (player.paused) player.play();
     else             player.pause();
   });
-  muteBtn.addEventListener('click', ()=>{
+  muteBtn.addEventListener('click', () => {
     if (!readyForControl) return;
     player.muted = !player.muted;
     updateMuteIcon();
   });
-  fullscreenBtn.addEventListener('click', ()=>{
+  fullscreenBtn.addEventListener('click', () => {
     if (!readyForControl) return;
     const fn = player.requestFullscreen
              || player.webkitRequestFullscreen
@@ -332,31 +350,27 @@ function setupCustomControls() {
     fn && fn.call(player);
   });
 
-  // -------- SCRUBBING (перетаскивание) --------
+  // SCRUBBING
   let wasPlaying = false;
 
   progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
   });
-
   progressSlider.addEventListener('input', () => {
-    const seekPct = progressSlider.value / 100;
-    player.currentTime = seekPct * player.duration;
+    const pct = progressSlider.value / 100;
+    player.currentTime = pct * player.duration;
   });
-
   progressSlider.addEventListener('mouseup', () => {
     emitSyncState();
-    if (wasPlaying) {
-      player.play().catch(()=>{});
-    }
+    if (wasPlaying) player.play().catch(() => {});
   });
 
-  player.addEventListener('play', ()=>{
+  player.addEventListener('play', () => {
     if (!ignoreSyncEvent && isUserAction) emitSyncState();
     isUserAction = false;
     updatePlayIcon();
   });
-  player.addEventListener('pause', ()=>{
+  player.addEventListener('pause', () => {
     if (skipFirstPause) {
       skipFirstPause = false;
       updatePlayIcon();
@@ -366,7 +380,9 @@ function setupCustomControls() {
     isUserAction = false;
     updatePlayIcon();
   });
-  player.addEventListener('seeked', ()=>{ if (!ignoreSyncEvent) emitSyncState(); });
+  player.addEventListener('seeked', () => {
+    if (!ignoreSyncEvent) emitSyncState();
+  });
   player.addEventListener('volumechange', updateMuteIcon);
 }
 
@@ -382,7 +398,7 @@ function updatePlayIcon() {
   playPauseBtn.textContent = player.paused ? '▶️' : '⏸️';
 }
 function updateMuteIcon() {
-  muteBtn.textContent = (player.muted||player.volume===0) ? '🔇' : '🔊';
+  muteBtn.textContent = (player.muted || player.volume === 0) ? '🔇' : '🔊';
 }
 
 function showSpinner() {
@@ -404,8 +420,8 @@ function createSpinner() {
 }
 
 function formatTime(t) {
-  t = Math.floor(t||0);
-  if (t>=3600) {
+  t = Math.floor(t || 0);
+  if (t >= 3600) {
     return `${Math.floor(t/3600)}:${String(Math.floor((t%3600)/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
   }
   return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
