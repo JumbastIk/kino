@@ -46,8 +46,8 @@ let ignoreSyncEvent   = false, syncErrorTimeout = null;
 let readyForControl   = false;
 let isUserAction      = false;  // только реальные клики отключают паузы
 
-// **Добавлено: флаг, чтобы игнорировать паузу при входе нового участника**
-let skipPauseOnJoin = false;
+// Добавлено: флаг для пропуска первой автопаузы при подключении
+let skipFirstPause    = false;
 
 // структуры участников
 let allMembers  = [];
@@ -146,6 +146,10 @@ socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;
   disableControls();
+
+  // При подключении пропускаем первую автопаузу
+  skipFirstPause = true;
+
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
@@ -156,8 +160,6 @@ socket.on('reconnect', () => {
   socket.emit('request_state', { roomId });
 });
 socket.on('members', ms => {
-  // **При входе нового участника пропустить паузу в следующем sync_state**
-  skipPauseOnJoin = true;
   allMembers = ms;
   updateMembersList();
 });
@@ -190,13 +192,6 @@ let firstSyncDone         = false;
 
 function applySyncState(data) {
   if (!metadataReady || !player) return;
-
-  // **Если пауза вызвана входом нового участника, сбросить is_paused**
-  if (skipPauseOnJoin) {
-    data.is_paused = false;
-    skipPauseOnJoin = false;
-  }
-
   if (!player.muted) player.muted = true;
 
   const now    = Date.now();
@@ -256,13 +251,12 @@ function emitSyncState() {
   });
 }
 
-// **Вот единственные правки по блокировке экрана:**
+// блокировка экрана
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    // видео WebView автоматически поставит паузу — просто игнорируем её
+    // видео WebView автоматически поставит паузу — игнорируем
     ignoreSyncEvent = true;
   } else {
-    // вернулись — снимаем игнор и синхронизируемся
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
     player.play().catch(()=>{});
@@ -292,12 +286,16 @@ async function fetchRoom() {
       throw new Error('HLS не поддерживается');
     }
 
+    // Загрузка метаданных
     video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       player = video;
+      // Сбрасываем флаг пропуска паузы после того как видео готово
+      skipFirstPause = false;
       socket.emit('request_state', { roomId });
       durationLabel.textContent = formatTime(player.duration || 0);
     });
+
     video.addEventListener('timeupdate', updateProgressBar);
     video.addEventListener('durationchange', ()=> {
       durationLabel.textContent = formatTime(player.duration || 0);
@@ -345,6 +343,12 @@ function setupCustomControls() {
     updatePlayIcon();
   });
   player.addEventListener('pause', ()=>{
+    // Пропустить первую автопаузу после connect
+    if (skipFirstPause) {
+      skipFirstPause = false;
+      updatePlayIcon();
+      return;
+    }
     if (!ignoreSyncEvent && isUserAction) emitSyncState();
     isUserAction = false;
     updatePlayIcon();
