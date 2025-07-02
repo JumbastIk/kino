@@ -18,6 +18,8 @@ const video             = document.getElementById('videoPlayer');
 const playPauseBtn      = document.getElementById('playPauseBtn');
 const muteBtn           = document.getElementById('muteBtn');
 const fullscreenBtn     = document.getElementById('fullscreenBtn');
+// Добавлено: захват ползунка-прогресса
+const progressSlider    = document.getElementById('progressSlider');
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
 const currentTimeLabel  = document.getElementById('currentTimeLabel');
@@ -73,12 +75,15 @@ function enableControls() {
     el.style.pointerEvents = '';
     el.style.opacity       = '';
   });
+  // добавляем доступ к ползунку
+  progressSlider.disabled = false;
 }
 function disableControls() {
   [playPauseBtn, muteBtn, fullscreenBtn, progressContainer].forEach(el => {
     el.style.pointerEvents = 'none';
     el.style.opacity       = '.6';
   });
+  progressSlider.disabled = true;
 }
 
 // --- Чат ---
@@ -136,7 +141,7 @@ setInterval(measurePingAndSend, 1000);
 socket.on('user_time_update', data => {
   if (data?.user_id) {
     userTimeMap[data.user_id] = data.currentTime;
-    userPingMap[data.user_id]  = data.ping;
+    userPingMap[data.user_id] = data.ping;
     updateMembersList();
   }
 });
@@ -329,12 +334,26 @@ function setupCustomControls() {
     fn && fn.call(player);
   });
 
-  progressContainer.addEventListener('click', e=>{
-    if (!readyForControl) return;
-    const rect = progressContainer.getBoundingClientRect();
-    const pct  = (e.clientX - rect.left)/rect.width;
-    player.currentTime = player.duration * pct;
+  // УБРАН old click handler:
+  // progressContainer.removeEventListener('click', ...);
+
+  // -------- SCRUBBING (перетаскивание) --------
+  let isSeeking = false;
+
+  progressSlider.addEventListener('mousedown', () => {
+    isSeeking = true;
+    player.pause();
+  });
+
+  progressSlider.addEventListener('input', () => {
+    const seekPct = progressSlider.value / 100;
+    player.currentTime = seekPct * player.duration;
+  });
+
+  progressSlider.addEventListener('mouseup', () => {
+    isSeeking = false;
     emitSyncState();
+    if (!player.paused) player.play().catch(()=>{});
   });
 
   player.addEventListener('play', ()=>{
@@ -359,8 +378,10 @@ function setupCustomControls() {
 
 function updateProgressBar() {
   if (!player.duration) return;
-  const pct = (player.currentTime/player.duration)*100;
-  progressBar.style.width = pct+'%';
+  const pct = (player.currentTime / player.duration) * 100;
+  progressBar.style.width = pct + '%';
+  // Добавлено: синхронизация ползунка
+  progressSlider.value = pct;
   currentTimeLabel.textContent = formatTime(player.currentTime);
 }
 
