@@ -47,8 +47,6 @@ let lastSyncLog       = 0;
 let ignoreSyncEvent   = false, syncErrorTimeout = null;
 let readyForControl   = false;
 
-// Флаг для пропуска первой автопаузы при подключении
-let skipFirstPause    = false;
 // Для visibilitychange
 let wasPausedOnHide   = true;
 // Участники
@@ -150,7 +148,6 @@ socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;
   disableControls();
-  skipFirstPause = true;
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
@@ -190,16 +187,31 @@ function updateMembersList() {
 // --- Синхронизация helper'ы ---
 function jumpTo(target) {
   ignoreSyncEvent = true;
-  player.currentTime = target;
-  setTimeout(() => { ignoreSyncEvent = false; }, 150);
+  // ждем хотя бы первого фрейма
+  if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    const onLoaded = () => {
+      player.currentTime = target;
+      player.removeEventListener('loadeddata', onLoaded);
+      setTimeout(() => { ignoreSyncEvent = false; }, 150);
+    };
+    player.addEventListener('loadeddata', onLoaded);
+  } else {
+    player.currentTime = target;
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
+  }
   logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
 }
 
 function syncPlayPause(paused) {
   ignoreSyncEvent = true;
-  if (paused) player.pause();
-  else if (player.paused) player.play().catch(() => {});
-  setTimeout(() => { ignoreSyncEvent = false; }, 150);
+  if (paused) {
+    player.pause();
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
+  } else {
+    player.play().catch(()=>{}).finally(() => {
+      setTimeout(() => { ignoreSyncEvent = false; }, 150);
+    });
+  }
 }
 
 // --- Синхронизация main ---
@@ -209,18 +221,16 @@ function applySyncState(data) {
   if (!metadataReady) return;
   if (!player.muted) player.muted = true;
 
-  // 1) delta не негативная
+  // корректируем delta
   let delta = (Date.now() - data.updatedAt) / 1000;
   if (delta < 0) delta = 0;
 
-  // 2) сырой target
+  // считаем target
   const raw = data.is_paused
             ? data.position
             : data.position + delta;
-
-  // 3) в [0, duration]
   const duration = player.duration || Infinity;
-  const target = Math.min(Math.max(raw, 0), duration);
+  const target   = Math.min(Math.max(raw, 0), duration);
 
   if (Math.abs(player.currentTime - target) > 0.5) {
     jumpTo(target);
@@ -306,7 +316,6 @@ async function fetchRoom() {
     video.addEventListener('loadedmetadata', () => {
       metadataReady = true;
       player = video;
-      skipFirstPause = false;
       socket.emit('request_state', { roomId });
       durationLabel.textContent = formatTime(player.duration || 0);
     });
@@ -329,7 +338,6 @@ function setupCustomControls() {
     if (!readyForControl) return;
     if (player.paused) player.play();
     else               player.pause();
-    // Сразу уведомляем сервер
     emitSyncState();
   });
   muteBtn.addEventListener('click', () => {
