@@ -83,6 +83,9 @@ let lastSyncLog       = 0;
 let ignoreSyncEvent   = false, syncErrorTimeout = null;
 let readyForControl   = false;
 
+// PATCH: SYNC UPGRADE: debounce переменная
+let lastEmitSyncState = 0;
+
 // PATCH: Антиспам для ручных действий (play/pause/seek)
 let lastUserAction = 0;
 function canUserAction() {
@@ -98,6 +101,9 @@ let wasPausedOnHide   = true;
 let allMembers  = [];
 let userTimeMap = {};
 let userPingMap = {};
+
+// PATCH: SYNC UPGRADE: для timestamp sync
+let lastSyncTimestamp = 0;
 
 // Telegram WebApp
 if (window.Telegram?.WebApp) {
@@ -241,11 +247,14 @@ socket.on('disconnect', () => {
 socket.on('reconnect_attempt', () => {
   showStatus('Пытаемся восстановить соединение…', '#fb4343');
 });
+// PATCH: SYNC UPGRADE: force sync после reconnect
 socket.on('reconnect', () => {
   hideStatus();
   readyForControl = false;
   disableControls();
+  // Не разрешаем управление, пока не придет новый sync_state!
   socket.emit('request_state', { roomId });
+  setTimeout(() => socket.emit('request_state', { roomId }), 900);
 });
 socket.on('members', ms => {
   allMembers = ms;
@@ -323,9 +332,18 @@ function planB_RequestServerState() {
   socket.emit('request_state', { roomId });
 }
 
+// PATCH: SYNC UPGRADE: Точное сравнение sync по timestamp
 function applySyncState(data) {
   if (!metadataReady) return;
   if (!player.muted) player.muted = true;
+
+  // PATCH: SYNC UPGRADE: игнор устаревших sync
+  const syncTimestamp = data.syncTimestamp || data.updatedAt || Date.now();
+  if (syncTimestamp < lastSyncTimestamp) {
+    logOnce('[SYNC] Пропущено устаревшее sync событие');
+    return;
+  }
+  lastSyncTimestamp = syncTimestamp;
 
   let delta = (Date.now() - data.updatedAt) / 1000;
   if (delta < 0) delta = 0;
@@ -362,13 +380,22 @@ socket.on('sync_state', data => {
   }, 1700);
 });
 
-// Надёжная отправка player_action
-function emitSyncState(source = 'USER') { // PATCH: метка для лога
+// PATCH: SYNC UPGRADE: Debounce для emitSyncState
+let debounceEmitTimeout = null;
+function emitSyncState(source = 'USER') {
   if (!player) return;
+  const now = Date.now();
+  if (now - lastEmitSyncState < 200) { // 200ms debounce
+    if (debounceEmitTimeout) clearTimeout(debounceEmitTimeout);
+    debounceEmitTimeout = setTimeout(() => emitSyncState(source), 200);
+    return;
+  }
+  lastEmitSyncState = now;
   socket.emit('player_action', {
     roomId,
     position: player.currentTime,
-    is_paused: player.paused
+    is_paused: player.paused,
+    syncTimestamp: Date.now() // PATCH: SYNC UPGRADE: добавляем timestamp
   });
   logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused} (${source})`);
 }
@@ -381,6 +408,8 @@ document.addEventListener('visibilitychange', () => {
     ignoreSyncEvent = true;
   } else {
     ignoreSyncEvent = false;
+    readyForControl = false; // PATCH: SYNC UPGRADE: блок управления
+    disableControls();
     socket.emit('request_state', { roomId });
     setTimeout(() => socket.emit('request_state', { roomId }), 1000); // PATCH: stability
     if (!wasPausedOnHide) {
