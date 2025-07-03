@@ -224,6 +224,16 @@ setInterval(() => {
   }
 }, 7000);
 
+// ====== PATCH: автосброс ignoreSyncEvent ======
+let lastSyncEvent = Date.now();
+setInterval(() => {
+  // Если больше 10 секунд не было sync/jumpTo — сбросить ignoreSyncEvent (он залип!)
+  if (ignoreSyncEvent && Date.now() - lastSyncEvent > 10000) {
+    ignoreSyncEvent = false;
+    logOnce('[PATCH] Force reset ignoreSyncEvent (auto)');
+  }
+}, 4000);
+
 // --- Сокет-события ---
 socket.on('connect', () => {
   myUserId = socket.id;
@@ -276,9 +286,7 @@ function updateMembersList() {
 // --- Синхронизация helper'ы ---
 function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
-  // --- PATCH: сброс ignoreSyncEvent через 2 сек, если что-то зависло ---
-  setTimeout(() => { ignoreSyncEvent = false; }, 2000);
-
+  lastSyncEvent = Date.now();
   if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
       player.currentTime = target;
@@ -295,7 +303,7 @@ function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
 
 function syncPlayPause(paused, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
-  setTimeout(() => { ignoreSyncEvent = false; }, 2000); // PATCH: сброс флага
+  lastSyncEvent = Date.now();
   if (paused) {
     player.pause();
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
@@ -372,7 +380,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     wasPausedOnHide = player.paused;
     ignoreSyncEvent = true;
-    setTimeout(() => { ignoreSyncEvent = false; }, 2000); // PATCH: сброс флага
   } else {
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
