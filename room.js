@@ -22,7 +22,7 @@ const progressSlider    = document.getElementById('progressSlider');
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
 const currentTimeLabel  = document.getElementById('currentTimeLabel');
-const leftTimeLabel     = document.getElementById('leftTimeLabel'); 
+const leftTimeLabel     = document.getElementById('leftTimeLabel'); // новый label
 const durationLabel     = document.getElementById('durationLabel');
 const messagesBox       = document.getElementById('messages');
 const membersList       = document.getElementById('membersList');
@@ -31,8 +31,6 @@ const sendBtn           = document.getElementById('sendBtn');
 const backLink          = document.getElementById('backLink');
 const roomIdCode        = document.getElementById('roomIdCode');
 const copyRoomId        = document.getElementById('copyRoomId');
-const qualitySelect     = document.getElementById('qualitySelect');
-
 
 // SVG icons
 const iconPlay    = document.getElementById('iconPlay');
@@ -398,10 +396,11 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// --- Видео + UI ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
-    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText); // PATCH: error msg
     const { movie_id } = await res.json();
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
@@ -414,40 +413,8 @@ async function fetchRoom() {
       hls.on(Hls.Events.ERROR, () => planB_RequestServerState());
       video.addEventListener('waiting', showSpinner);
       video.addEventListener('playing', hideSpinner);
-
-      // --- ВАЖНО: Реализовать рабочий выбор качества через select#qualitySelect ---
-      hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
-        if (!qualitySelect) return;
-        // Очистить селектор
-        qualitySelect.innerHTML = '';
-        // Если уровней больше 1 — показать
-        if (data.levels && data.levels.length > 1) {
-          qualitySelect.style.display = '';
-          // Добавить авто
-          const optAuto = document.createElement('option');
-          optAuto.value = -1;
-          optAuto.text = 'Auto';
-          qualitySelect.appendChild(optAuto);
-          // Добавить все варианты
-          data.levels.forEach((level, i) => {
-            const opt = document.createElement('option');
-            opt.value = i;
-            opt.text = `${level.height}p (${Math.round(level.bitrate/1000)}kbps)`;
-            qualitySelect.appendChild(opt);
-          });
-          // Текущий
-          qualitySelect.value = hls.currentLevel;
-          // Обработчик
-          qualitySelect.onchange = function () {
-            hls.currentLevel = parseInt(this.value, 10);
-          };
-        } else {
-          qualitySelect.style.display = 'none';
-        }
-      });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = movie.videoUrl;
-      if (qualitySelect) qualitySelect.style.display = 'none';
     } else {
       throw new Error('HLS не поддерживается');
     }
@@ -472,6 +439,7 @@ async function fetchRoom() {
   } catch (err) {
     logError(err.message, err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${escapeHtml(err.message)}</p>`;
+    // PATCH: кнопка Попробовать снова
     showStatus('Ошибка при получении данных.', '#f44', 'Попробовать снова', () => {
       hideStatus();
       playerWrapper.innerHTML = '';
