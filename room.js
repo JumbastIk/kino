@@ -276,6 +276,9 @@ function updateMembersList() {
 // --- Синхронизация helper'ы ---
 function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
+  // --- PATCH: сброс ignoreSyncEvent через 2 сек, если что-то зависло ---
+  setTimeout(() => { ignoreSyncEvent = false; }, 2000);
+
   if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
       player.currentTime = target;
@@ -292,6 +295,7 @@ function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
 
 function syncPlayPause(paused, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
+  setTimeout(() => { ignoreSyncEvent = false; }, 2000); // PATCH: сброс флага
   if (paused) {
     player.pause();
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
@@ -368,6 +372,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     wasPausedOnHide = player.paused;
     ignoreSyncEvent = true;
+    setTimeout(() => { ignoreSyncEvent = false; }, 2000); // PATCH: сброс флага
   } else {
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
