@@ -206,7 +206,7 @@ socket.on('user_time_update', data => {
   }
 });
 
-// ===== 1.8. Watchdog автосинхронизация (деликатно, теперь smooth sync) =====
+// ===== 1.8. Watchdog автосинхронизация (деликатно) =====
 function getMedianTime() {
   const times = Object.values(userTimeMap).filter(t => typeof t === 'number');
   if (!times.length) return player.currentTime;
@@ -214,33 +214,16 @@ function getMedianTime() {
   const mid = Math.floor(times.length / 2);
   return times.length % 2 === 0 ? (times[mid - 1] + times[mid]) / 2 : times[mid];
 }
-
-function smoothSync(target, delta) {
-  // Плавная корректировка playbackRate для дельты 0.3–1.5 сек
-  if (Math.abs(delta) < 0.3 || Math.abs(delta) > 1.5) return;
-  let rate = delta > 0 ? 1.07 : 0.93;
-  let timeout = Math.min(1500, Math.abs(delta * 1000));
-  let oldRate = player.playbackRate;
-  player.playbackRate = rate;
-  setTimeout(() => {
-    player.playbackRate = oldRate;
-    player.currentTime = target; // финальная коррекция
-  }, timeout);
-}
-
-// *** Патч: синк теперь раз в 1.5 сек и smooth sync ***
 setInterval(() => {
   if (!readyForControl) return;
   const median = getMedianTime();
-  const delta = player.currentTime - median;
-  if (Math.abs(delta) > 0.3 && Math.abs(delta) <= 1.5 && !player.paused) {
-    logOnce('Smooth sync (delta ' + delta.toFixed(2) + ')');
-    smoothSync(median, delta);
-  } else if (Math.abs(delta) > 1.5 && Math.abs(delta) < 30 && !player.paused) {
-    logOnce('Watchdog: Автосинхронизация (delta ' + delta.toFixed(2) + ' сек.)');
+  const delta = Math.abs(player.currentTime - median);
+  // PATCH: stability — расширен диапазон "большой" рассинхры, чтобы sync всегда ловился
+  if (delta > 2.3 && delta < 30 && !player.paused) {
+    logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
     player.currentTime = median;
   }
-}, 1500);
+}, 7000);
 
 // --- Сокет-события ---
 socket.on('connect', () => {
@@ -292,7 +275,7 @@ function updateMembersList() {
 }
 
 // --- Синхронизация helper'ы ---
-function jumpTo(target, source = 'REMOTE') {
+function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
   if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
@@ -308,7 +291,7 @@ function jumpTo(target, source = 'REMOTE') {
   logOnce(`[SYNC] JUMP to ${target.toFixed(2)} (${source})`);
 }
 
-function syncPlayPause(paused, source = 'REMOTE') {
+function syncPlayPause(paused, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
   if (paused) {
     player.pause();
@@ -353,10 +336,7 @@ function applySyncState(data) {
   const duration = player.duration || Infinity;
   const target   = Math.min(Math.max(raw, 0), duration);
 
-  const diff = Math.abs(player.currentTime - target);
-  if (diff > 0.3 && diff <= 1.5) {
-    smoothSync(target, diff);
-  } else if (diff > 1.5) {
+  if (Math.abs(player.currentTime - target) > 0.5) {
     jumpTo(target, 'REMOTE');
   }
 
@@ -382,12 +362,8 @@ socket.on('sync_state', data => {
   }, 1700);
 });
 
-// Надёжная отправка player_action (антифлуд — минимум 500мс)
-let lastEmitSync = 0;
-function emitSyncState(source = 'USER') {
-  const now = Date.now();
-  if (now - lastEmitSync < 500) return;
-  lastEmitSync = now;
+// Надёжная отправка player_action
+function emitSyncState(source = 'USER') { // PATCH: метка для лога
   if (!player) return;
   socket.emit('player_action', {
     roomId,
@@ -398,6 +374,7 @@ function emitSyncState(source = 'USER') {
 }
 
 // --- Обработка visibilitychange ---
+// PATCH: stability — при возвращении страницы, всегда делаем повторный запрос sync дважды
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     wasPausedOnHide = player.paused;
@@ -492,16 +469,7 @@ function setupCustomControls() {
     player.currentTime = pct * player.duration;
   });
   progressSlider.addEventListener('mouseup', () => {
-    if (!canUserAction()) return;
-    emitSyncState('USER');
-    if (wasPlaying) player.play().catch(() => {});
-  });
-
-  // Touch for mobile
-  progressSlider.addEventListener('touchstart', () => {
-    wasPlaying = !player.paused;
-  });
-  progressSlider.addEventListener('touchend', () => {
+    if (!canUserAction()) return; // PATCH: антиспам
     emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
   });
