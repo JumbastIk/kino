@@ -1,36 +1,45 @@
-// == BACKEND URL, RoomID ==
+// common.js
+
 const BACKEND = 'https://kino-fhwp.onrender.com';
+const socket = io(BACKEND, { path: '/socket.io', transports: ['websocket'] });
+const params = new URLSearchParams(location.search);
+const roomId = params.get('roomId');
 
-// Глобальный socket (единственный на страницу)
-window.socket = io(BACKEND, {
-  path: '/socket.io',
-  transports: ['websocket']
-});
+const playerWrapper     = document.getElementById('playerWrapper');
+const video             = document.getElementById('videoPlayer');
+const player            = video; // Обязательно!
 
-// RoomID из query-параметров
-window.params = new URLSearchParams(location.search);
-window.roomId = params.get('roomId');
+const playPauseBtn      = document.getElementById('playPauseBtn');
+const muteBtn           = document.getElementById('muteBtn');
+const fullscreenBtn     = document.getElementById('fullscreenBtn');
+const progressSlider    = document.getElementById('progressSlider');
+const progressContainer = document.getElementById('progressContainer');
+const progressBar       = document.getElementById('progressBar');
+const currentTimeLabel  = document.getElementById('currentTimeLabel');
+const durationLabel     = document.getElementById('durationLabel');
+const messagesBox       = document.getElementById('messages');
+const membersList       = document.getElementById('membersList');
+const msgInput          = document.getElementById('msgInput');
+const sendBtn           = document.getElementById('sendBtn');
+const backLink          = document.getElementById('backLink');
+const roomIdCode        = document.getElementById('roomIdCode');
+const copyRoomId        = document.getElementById('copyRoomId');
 
-// == DOM Elements ==
-window.playerWrapper     = document.getElementById('playerWrapper');
-window.video             = document.getElementById('videoPlayer');
-window.playPauseBtn      = document.getElementById('playPauseBtn');
-window.muteBtn           = document.getElementById('muteBtn');
-window.fullscreenBtn     = document.getElementById('fullscreenBtn');
-window.progressSlider    = document.getElementById('progressSlider');
-window.progressContainer = document.getElementById('progressContainer');
-window.progressBar       = document.getElementById('progressBar');
-window.currentTimeLabel  = document.getElementById('currentTimeLabel');
-window.durationLabel     = document.getElementById('durationLabel');
-window.messagesBox       = document.getElementById('messages');
-window.membersList       = document.getElementById('membersList');
-window.msgInput          = document.getElementById('msgInput');
-window.sendBtn           = document.getElementById('sendBtn');
-window.backLink          = document.getElementById('backLink');
-window.roomIdCode        = document.getElementById('roomIdCode');
-window.copyRoomId        = document.getElementById('copyRoomId');
+// === Состояния ===
+let spinner;
+let myUserId          = null;
+let metadataReady     = false;
+let lastSyncLog       = 0;
+let ignoreSyncEvent   = false, syncErrorTimeout = null;
+let readyForControl   = false;
+let lastUserAction    = 0;
+let wasPausedOnHide   = true;
+let allMembers        = [];
+let userTimeMap       = {};
+let userPingMap       = {};
+let planBAttempts     = 0;
 
-// == StatusBar ==
+// === StatusBar ===
 const statusBar = document.createElement('div');
 statusBar.style.position = 'fixed';
 statusBar.style.bottom = '18px';
@@ -44,7 +53,8 @@ statusBar.style.fontSize = '15px';
 statusBar.style.borderRadius = '18px';
 statusBar.style.display = 'none';
 document.body.appendChild(statusBar);
-window.showStatus = function(msg, color = '#ff9696', btnText = '', btnHandler = null) {
+
+function showStatus(msg, color = '#ff9696', btnText = '', btnHandler = null) {
   statusBar.textContent = msg;
   statusBar.style.background = color;
   statusBar.style.display = '';
@@ -61,55 +71,37 @@ window.showStatus = function(msg, color = '#ff9696', btnText = '', btnHandler = 
     btn.onclick = btnHandler;
     statusBar.appendChild(btn);
   }
-};
-window.hideStatus = function() {
-  statusBar.style.display = 'none';
-};
+}
+function hideStatus() { statusBar.style.display = 'none'; }
 
-// == State Variables ==
-window.player            = video;
-window.spinner           = null;
-window.myUserId          = null;
-window.metadataReady     = false;
-window.lastSyncLog       = 0;
-window.ignoreSyncEvent   = false;
-window.syncErrorTimeout  = null;
-window.readyForControl   = false;
-window.lastUserAction    = 0;
-window.wasPausedOnHide   = true;
-window.allMembers        = [];
-window.userTimeMap       = {};
-window.userPingMap       = {};
-
-// == UTILS ==
-window.canUserAction = function() {
+function canUserAction() {
   let now = Date.now();
   if (now - lastUserAction < 300) return false;
   lastUserAction = now;
   return true;
-};
-window.escapeHtml = function(str) {
+}
+function escapeHtml(str) {
   return String(str).replace(/[&<>"'`=\/]/g, function(s) {
     return ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;',
       '=': '&#61;', '/': '&#47;'
     })[s];
   });
-};
-window.logError = function(msg, err) {
+}
+function logError(msg, err) {
   console.error('[Room Error]', msg, err || '');
-};
-window.logOnce = function(msg) {
+}
+function logOnce(msg) {
   const now = Date.now();
   if (now - lastSyncLog > 600) {
     console.log(msg);
     lastSyncLog = now;
   }
-};
-window.formatTime = function(t) {
+}
+function formatTime(t) {
   t = Math.floor(t || 0);
   if (t >= 3600) {
     return `${Math.floor(t/3600)}:${String(Math.floor((t%3600)/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
   }
   return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
-};
+}
