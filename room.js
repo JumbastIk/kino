@@ -106,7 +106,7 @@ function disableControls() {
   progressSlider.disabled = true;
 }
 
-// ===== 1.1. Sanitize XSS в чате =====
+// ===== 1.1. Sanitize XSS + лимит длины чата =====
 function escapeHtml(str) {
   return String(str).replace(/[&<>"'`=\/]/g, function(s) {
     return ({
@@ -143,10 +143,9 @@ function sendMessage() {
   msgInput.value = '';
 }
 
-// ===== 1.6. Централизованное логгирование ошибок =====
+// ===== 1.6. Централизованный logError =====
 function logError(msg, err) {
   console.error('[Room Error]', msg, err || '');
-  // Можно отправлять на сервер/telegram или в analytics по желанию
 }
 
 // Логгер
@@ -185,7 +184,7 @@ socket.on('user_time_update', data => {
   }
 });
 
-// ===== 1.8. Watchdog синхронизации видео =====
+// ===== 1.8. Watchdog автосинхронизация (деликатно) =====
 function getMedianTime() {
   const times = Object.values(userTimeMap).filter(t => typeof t === 'number');
   if (!times.length) return player.currentTime;
@@ -197,11 +196,11 @@ setInterval(() => {
   if (!readyForControl) return;
   const median = getMedianTime();
   const delta = Math.abs(player.currentTime - median);
-  if (delta > 2.3) {
+  if (delta > 2.3 && delta < 10 && !player.paused) { // аккуратно, не перескакивать сотни секунд
     logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
     player.currentTime = median;
   }
-}, 6000);
+}, 7000);
 
 // --- Сокет-события ---
 socket.on('connect', () => {
@@ -396,7 +395,7 @@ async function fetchRoom() {
     setupCustomControls();
     showSpinner();
   } catch (err) {
-    logError(err.message, err); // Изменила console.error на logError
+    logError(err.message, err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
@@ -481,7 +480,7 @@ function formatTime(t) {
   return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
 }
 
-// ===== 1.10. Простая проверка функций (ручная sanityCheck) =====
+// ===== 1.10. SanityCheck (ручная проверка функций) =====
 function sanityCheck() {
   try {
     [
