@@ -1,32 +1,33 @@
 // player.js
 
+// Гарантируем, что всё из common.js есть в window
 video.setAttribute('playsinline', '');
 video.setAttribute('webkit-playsinline', '');
 video.autoplay = true;
 video.muted    = true;
 
-function enableControls() {
+window.enableControls = function() {
   [playPauseBtn, muteBtn, fullscreenBtn, progressContainer].forEach(el => {
     el.style.pointerEvents = '';
     el.style.opacity       = '';
   });
   progressSlider.disabled = false;
-}
-function disableControls() {
+};
+window.disableControls = function() {
   [playPauseBtn, muteBtn, fullscreenBtn, progressContainer].forEach(el => {
     el.style.pointerEvents = 'none';
     el.style.opacity       = '.6';
   });
   progressSlider.disabled = true;
-}
+};
 
-function setupCustomControls() {
+window.setupCustomControls = function() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
     if (!canUserAction()) return;
     if (player.paused) player.play();
     else               player.pause();
-    emitSyncState('USER');
+    if (typeof emitSyncState === 'function') emitSyncState('USER');
   });
   muteBtn.addEventListener('click', () => {
     if (!readyForControl) return;
@@ -51,47 +52,47 @@ function setupCustomControls() {
   });
   progressSlider.addEventListener('mouseup', () => {
     if (!canUserAction()) return;
-    emitSyncState('USER');
+    if (typeof emitSyncState === 'function') emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
   });
 
   player.addEventListener('play', updatePlayIcon);
   player.addEventListener('pause', updatePlayIcon);
   player.addEventListener('volumechange', updateMuteIcon);
-}
+};
 
-function updateProgressBar() {
+window.updateProgressBar = function() {
   if (!player.duration) return;
   const pct = (player.currentTime / player.duration) * 100;
   progressBar.style.width = pct + '%';
   progressSlider.value    = pct;
   currentTimeLabel.textContent = formatTime(player.currentTime);
-}
+};
 
-function updatePlayIcon() {
+window.updatePlayIcon = function() {
   playPauseBtn.textContent = player.paused ? '▶️' : '⏸️';
-}
-function updateMuteIcon() {
+};
+window.updateMuteIcon = function() {
   muteBtn.textContent = (player.muted || player.volume === 0) ? '🔇' : '🔊';
-}
+};
 
-function showSpinner() {
+window.showSpinner = function() {
   if (!spinner) {
     spinner = createSpinner();
     playerWrapper.appendChild(spinner);
   }
   spinner.style.display = 'block';
-}
-function hideSpinner() {
+};
+window.hideSpinner = function() {
   spinner && (spinner.style.display = 'none');
-}
-function createSpinner() {
+};
+window.createSpinner = function() {
   const s = document.createElement('div');
   s.className = 'buffer-spinner';
   s.innerHTML = `<div class="double-bounce1"></div><div class="double-bounce2"></div>`;
   s.style.display = 'none';
   return s;
-}
+};
 
 window.addEventListener('DOMContentLoaded', () => {
   setupCustomControls();

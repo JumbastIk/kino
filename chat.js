@@ -1,5 +1,6 @@
 // chat.js
 
+// ——— Экранирование HTML
 function escapeHtml(str) {
   return String(str).replace(/[&<>"'`=\/]/g, function(s) {
     return ({
@@ -9,6 +10,7 @@ function escapeHtml(str) {
   });
 }
 
+// ——— Сообщения в чат
 function appendMessage(author, text) {
   const d = document.createElement('div');
   d.className = 'chat-message';
@@ -24,9 +26,7 @@ function appendSystemMessage(text) {
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 
-sendBtn.addEventListener('click', sendMessage);
-msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
-
+// ——— Отправка сообщения
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
@@ -39,9 +39,20 @@ function sendMessage() {
   msgInput.value = '';
 }
 
+// ——— События DOM
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+
+// ——— Socket события для чата
 socket.on('history', data => {
   messagesBox.innerHTML = '';
   data.forEach(m => appendMessage(m.author, m.text));
 });
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
+
+// ——— Экспорт для глобальной видимости
+window.appendMessage = appendMessage;
+window.appendSystemMessage = appendSystemMessage;
+window.sendMessage = sendMessage;
+window.escapeHtml = escapeHtml;

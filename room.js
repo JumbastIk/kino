@@ -1,15 +1,15 @@
 // room.js
 
-// ! НЕ объявляем params, roomId, socket — они уже есть из common.js
+// ! Не объявляем params, roomId, socket — они уже есть из common.js
 
-// Показать ID комнаты (использует переменные, объявленные в common.js)
+// --- Показываем ID комнаты ---
 if (window.roomIdCode) roomIdCode.textContent = roomId;
 if (window.copyRoomId) copyRoomId.onclick = () => {
   navigator.clipboard.writeText(roomId);
   alert('Скопировано!');
 };
 
-// Telegram WebApp интеграция
+// --- Telegram WebApp интеграция ---
 if (window.Telegram?.WebApp) {
   Telegram.WebApp.disableVerticalSwipes();
   Telegram.WebApp.enableClosingConfirmation();
@@ -23,7 +23,7 @@ socket.on('connect', () => {
   hideStatus();
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
-  fetchRoom();
+  if (typeof fetchRoom === 'function') fetchRoom();
 });
 socket.on('disconnect', () => {
   showStatus('Отключено от сервера. Ждем восстановления…', '#fc8');
@@ -39,7 +39,7 @@ socket.on('reconnect', () => {
 });
 socket.on('members', ms => {
   allMembers = ms;
-  updateMembersList();
+  if (typeof updateMembersList === 'function') updateMembersList();
 });
 socket.on('history', data => {
   messagesBox.innerHTML = '';
@@ -48,32 +48,34 @@ socket.on('history', data => {
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
 
-// --- Синхронизация состояния --- 
+// --- Синхронизация состояния ---
 socket.on('user_time_update', data => {
   if (data?.user_id) {
     userTimeMap[data.user_id] = data.currentTime;
     userPingMap[data.user_id] = data.ping;
-    updateMembersList();
+    if (typeof updateMembersList === 'function') updateMembersList();
   }
 });
 socket.on('sync_state', data => {
   planBAttempts = 0;
-  applySyncState(data);
+  if (typeof applySyncState === 'function') applySyncState(data);
   clearTimeout(syncErrorTimeout);
   syncErrorTimeout = setTimeout(() => {
     if (Date.now() - data.updatedAt > 1600) {
-      planB_RequestServerState();
+      if (typeof planB_RequestServerState === 'function') planB_RequestServerState();
     }
   }, 1700);
 });
 
 // === Пинг ===
-setInterval(measurePingAndSend, 1000);
+if (typeof measurePingAndSend === 'function') {
+  setInterval(measurePingAndSend, 1000);
+}
 
 // === Watchdog ===
 setInterval(() => {
   if (!readyForControl) return;
-  const median = getMedianTime();
+  const median = typeof getMedianTime === 'function' ? getMedianTime() : player.currentTime;
   const delta = Math.abs(player.currentTime - median);
   if (delta > 2.3 && delta < 30 && !player.paused) {
     logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
@@ -97,4 +99,6 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // === SanityCheck ===
-window.addEventListener('DOMContentLoaded', sanityCheck);
+window.addEventListener('DOMContentLoaded', () => {
+  if (typeof sanityCheck === 'function') sanityCheck();
+});
