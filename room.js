@@ -18,6 +18,7 @@ const video             = document.getElementById('videoPlayer');
 const playPauseBtn      = document.getElementById('playPauseBtn');
 const muteBtn           = document.getElementById('muteBtn');
 const fullscreenBtn     = document.getElementById('fullscreenBtn');
+// Ползунок прогресса
 const progressSlider    = document.getElementById('progressSlider');
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
@@ -31,32 +32,58 @@ const backLink          = document.getElementById('backLink');
 const roomIdCode        = document.getElementById('roomIdCode');
 const copyRoomId        = document.getElementById('copyRoomId');
 
+// ===== 1.2. Индикатор статуса соединения =====
+const statusBar = document.createElement('div');
+statusBar.style.position = 'fixed';
+statusBar.style.bottom = '18px';
+statusBar.style.left = '50%';
+statusBar.style.transform = 'translateX(-50%)';
+statusBar.style.padding = '10px 18px';
+statusBar.style.background = '#23232cde';
+statusBar.style.color = '#ff9696';
+statusBar.style.zIndex = '20000';
+statusBar.style.fontSize = '15px';
+statusBar.style.borderRadius = '18px';
+statusBar.style.display = 'none';
+document.body.appendChild(statusBar);
+function showStatus(msg, color = '#ff9696') {
+  statusBar.textContent = msg;
+  statusBar.style.background = color;
+  statusBar.style.display = '';
+}
+function hideStatus() {
+  statusBar.style.display = 'none';
+}
+
+// Показ ID комнаты
 if (roomIdCode) roomIdCode.textContent = roomId;
 if (copyRoomId) copyRoomId.onclick = () => {
   navigator.clipboard.writeText(roomId);
   alert('Скопировано!');
 };
 
-let player          = video;
-let spinner;
-let myUserId        = null;
-let metadataReady   = false;
-let lastSyncLog     = 0;
-let ignoreSyncEvent = false;
-let syncErrorTimeout;
-let readyForControl = false;
+let player            = video,
+    spinner,
+    myUserId          = null;
+let metadataReady     = false;
+let lastSyncLog       = 0;
+let ignoreSyncEvent   = false, syncErrorTimeout = null;
+let readyForControl   = false;
 
-let wasPausedOnHide = true;
-let allMembers      = [];
-let userTimeMap     = {};
-let userPingMap     = {};
+// Для visibilitychange
+let wasPausedOnHide   = true;
+// Участники
+let allMembers  = [];
+let userTimeMap = {};
+let userPingMap = {};
 
-// Telegram WebApp hooks (если нужно)
+// Telegram WebApp
 if (window.Telegram?.WebApp) {
   Telegram.WebApp.disableVerticalSwipes();
   Telegram.WebApp.enableClosingConfirmation();
 }
 
+// Inline-видео
 video.setAttribute('playsinline', '');
 video.setAttribute('webkit-playsinline', '');
 video.autoplay = true;
@@ -79,18 +106,26 @@ function disableControls() {
   progressSlider.disabled = true;
 }
 
-// --- Чат ---
+// ===== 1.1. Sanitize XSS в чате =====
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"'`=\/]/g, function(s) {
+    return ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;',
+      '=': '&#61;', '/': '&#47;'
+    })[s];
+  });
+}
 function appendMessage(author, text) {
   const d = document.createElement('div');
   d.className = 'chat-message';
-  d.innerHTML = `<strong>${author}:</strong> ${text}`;
+  d.innerHTML = `<strong>${escapeHtml(author)}:</strong> ${escapeHtml(text)}`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 function appendSystemMessage(text) {
   const d = document.createElement('div');
   d.className = 'chat-message system-message';
-  d.innerHTML = `<em>${text}</em>`;
+  d.innerHTML = `<em>${escapeHtml(text)}</em>`;
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
@@ -99,8 +134,19 @@ msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage()
 function sendMessage() {
   const t = msgInput.value.trim();
   if (!t) return;
+  if (t.length > 1000) {
+    showStatus('Сообщение слишком длинное!', '#a23');
+    setTimeout(hideStatus, 1500);
+    return;
+  }
   socket.emit('chat_message', { roomId, author: 'Гость', text: t });
   msgInput.value = '';
+}
+
+// ===== 1.6. Централизованное логгирование ошибок =====
+function logError(msg, err) {
+  console.error('[Room Error]', msg, err || '');
+  // Можно отправлять на сервер/telegram или в analytics по желанию
 }
 
 // Логгер
@@ -112,7 +158,7 @@ function logOnce(msg) {
   }
 }
 
-// Пинг-замер
+// Пинг
 function measurePingAndSend() {
   if (!player || !myUserId) return;
   const t0 = Date.now();
@@ -139,17 +185,42 @@ socket.on('user_time_update', data => {
   }
 });
 
-// --- Socket.IO события ---
+// ===== 1.8. Watchdog синхронизации видео =====
+function getMedianTime() {
+  const times = Object.values(userTimeMap).filter(t => typeof t === 'number');
+  if (!times.length) return player.currentTime;
+  times.sort((a, b) => a - b);
+  const mid = Math.floor(times.length / 2);
+  return times.length % 2 === 0 ? (times[mid - 1] + times[mid]) / 2 : times[mid];
+}
+setInterval(() => {
+  if (!readyForControl) return;
+  const median = getMedianTime();
+  const delta = Math.abs(player.currentTime - median);
+  if (delta > 2.3) {
+    logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
+    player.currentTime = median;
+  }
+}, 6000);
+
+// --- Сокет-события ---
 socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;
   disableControls();
-
+  hideStatus();
   socket.emit('join', { roomId, userData: { id: myUserId, first_name: 'Гость' } });
   socket.emit('request_state', { roomId });
   fetchRoom();
 });
+socket.on('disconnect', () => {
+  showStatus('Отключено от сервера. Ждем восстановления…', '#fc8');
+});
+socket.on('reconnect_attempt', () => {
+  showStatus('Пытаемся восстановить соединение…', '#fb4343');
+});
 socket.on('reconnect', () => {
+  hideStatus();
   readyForControl = false;
   disableControls();
   socket.emit('request_state', { roomId });
@@ -165,7 +236,7 @@ socket.on('history', data => {
 socket.on('chat_message', m => appendMessage(m.author, m.text));
 socket.on('system_message', msg => msg?.text && appendSystemMessage(msg.text));
 
-// Обновление списка участников
+// Обновить список участников
 function updateMembersList() {
   if (!Array.isArray(allMembers)) return;
   membersList.innerHTML = allMembers.map(m => {
@@ -181,11 +252,11 @@ function updateMembersList() {
   }).join('');
 }
 
-// --- Синхронизация вспомогательные ---
+// --- Синхронизация helper'ы ---
 function jumpTo(target) {
   ignoreSyncEvent = true;
-  // Если видео ещё не готово — ждём первого фрейма
-  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+  // ждем хотя бы первого фрейма
+  if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
       player.currentTime = target;
       player.removeEventListener('loadeddata', onLoaded);
@@ -198,60 +269,45 @@ function jumpTo(target) {
   }
   logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
 }
+
 function syncPlayPause(paused) {
   ignoreSyncEvent = true;
   if (paused) {
     player.pause();
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
   } else {
-    player.play().catch(() => {}).finally(() => {
+    player.play().catch(()=>{}).finally(() => {
       setTimeout(() => { ignoreSyncEvent = false; }, 150);
     });
   }
 }
 
-// --- Основная синхронизация ---
+// --- Синхронизация main ---
 let firstSyncDone = false;
-let lastPlanB     = 0;
-
-function planB_RequestServerState() {
-  const now = Date.now();
-  if (now - lastPlanB < 5000) return;   // троттлинг: не чаще 1×/5 с
-  lastPlanB = now;
-  socket.emit('request_state', { roomId });
-}
 
 function applySyncState(data) {
   if (!metadataReady) return;
   if (!player.muted) player.muted = true;
 
-  // 1) вычисляем «срезанную» delta
+  // корректируем delta
   let delta = (Date.now() - data.updatedAt) / 1000;
   if (delta < 0) delta = 0;
 
-  // 2) целевая позиция
-  const raw    = data.is_paused
-               ? data.position
-               : data.position + delta;
-  const dur    = player.duration || Infinity;
-  const target = Math.min(Math.max(raw, 0), dur);
-  const diff   = target - player.currentTime;
+  // считаем target
+  const raw = data.is_paused
+            ? data.position
+            : data.position + delta;
+  const duration = player.duration || Infinity;
+  const target   = Math.min(Math.max(raw, 0), duration);
 
-  // 3) сначала корректируем скорость, потом (при большом рассинхроне) — джамп
-  if (Math.abs(diff) > 5) {
+  if (Math.abs(player.currentTime - target) > 0.5) {
     jumpTo(target);
-  } else if (Math.abs(diff) > 0.5) {
-    ignoreSyncEvent = true;
-    // подгоняем скорость на короткий промежуток
-    player.playbackRate = 1 + diff * 0.1;
-    setTimeout(() => {
-      player.playbackRate = 1;
-      ignoreSyncEvent = false;
-    }, 800);
-    logOnce(`[SYNC] SLOW ADJUST by ${diff.toFixed(2)}s`);
   }
 
-  // 4) play/pause
+  if (!firstSyncDone) {
+    firstSyncDone = true;
+  }
+
   syncPlayPause(data.is_paused);
 
   updateProgressBar();
@@ -259,18 +315,25 @@ function applySyncState(data) {
   enableControls();
 }
 
+let lastPlanB = 0;
+function planB_RequestServerState() {
+  const now = Date.now();
+  if (now - lastPlanB < 4000) return;
+  lastPlanB = now;
+  socket.emit('request_state', { roomId });
+}
+
 socket.on('sync_state', data => {
   applySyncState(data);
   clearTimeout(syncErrorTimeout);
   syncErrorTimeout = setTimeout(() => {
-    // если сервер молчит дольше 1.6 с, шлём Plan B
     if (Date.now() - data.updatedAt > 1600) {
       planB_RequestServerState();
     }
   }, 1700);
 });
 
-// надёжная отправка player_action
+// Надёжная отправка player_action
 function emitSyncState() {
   if (!player) return;
   socket.emit('player_action', {
@@ -289,11 +352,13 @@ document.addEventListener('visibilitychange', () => {
   } else {
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
-    if (!wasPausedOnHide) player.play().catch(() => {});
+    if (!wasPausedOnHide) {
+      player.play().catch(() => {});
+    }
   }
 });
 
-// --- Загрузка и инициализация видео ---
+// --- Видео + UI ---
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
@@ -330,14 +395,12 @@ async function fetchRoom() {
 
     setupCustomControls();
     showSpinner();
-
   } catch (err) {
-    console.error(err);
+    logError(err.message, err); // Изменила console.error на logError
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
   }
 }
 
-// --- Кастомные контролы и scrubber ---
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
@@ -358,6 +421,7 @@ function setupCustomControls() {
     fn && fn.call(player);
   });
 
+  // SCRUBBING
   let wasPlaying = false;
   progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
@@ -416,3 +480,23 @@ function formatTime(t) {
   }
   return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
 }
+
+// ===== 1.10. Простая проверка функций (ручная sanityCheck) =====
+function sanityCheck() {
+  try {
+    [
+      playerWrapper, video, playPauseBtn, muteBtn, fullscreenBtn, progressSlider,
+      progressContainer, progressBar, currentTimeLabel, durationLabel,
+      messagesBox, membersList, msgInput, sendBtn
+    ].forEach(el => {
+      if (!el) throw new Error('Отсутствует элемент: ' + (el && el.id));
+    });
+    if (!socket) throw new Error('Socket не инициализирован');
+    if (typeof getMedianTime !== 'function') throw new Error('Watchdog не работает');
+    console.log('SanityCheck: OK');
+  } catch (e) {
+    logError('SanityCheck fail', e);
+    showStatus('Критическая ошибка. Перезагрузите страницу.', '#f44');
+  }
+}
+window.addEventListener('DOMContentLoaded', sanityCheck);
