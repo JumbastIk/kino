@@ -206,7 +206,7 @@ socket.on('user_time_update', data => {
   }
 });
 
-// ===== 1.8. Watchdog автосинхронизация (деликатно) =====
+// ===== Синхронизация: улучшенный watchdog и smooth sync =====
 function getMedianTime() {
   const times = Object.values(userTimeMap).filter(t => typeof t === 'number');
   if (!times.length) return player.currentTime;
@@ -214,16 +214,37 @@ function getMedianTime() {
   const mid = Math.floor(times.length / 2);
   return times.length % 2 === 0 ? (times[mid - 1] + times[mid]) / 2 : times[mid];
 }
+
+function smoothSync(target, maxDuration = 1.5) {
+  // Если рассинхрон до 1.5 сек — плавно корректируем playbackRate
+  const diff = target - player.currentTime;
+  if (Math.abs(diff) < 0.3) return; // ничего не делать
+  let originalRate = 1;
+  let speed = diff > 0 ? 1.07 : 0.93;
+  let duration = Math.min(Math.abs(diff), maxDuration);
+
+  player.playbackRate = speed;
+  setTimeout(() => {
+    player.playbackRate = originalRate;
+    player.currentTime = target; // гарантируем sync
+  }, duration * 1000);
+}
+
 setInterval(() => {
   if (!readyForControl) return;
   const median = getMedianTime();
   const delta = Math.abs(player.currentTime - median);
-  // PATCH: stability — расширен диапазон "большой" рассинхры, чтобы sync всегда ловился
-  if (delta > 2.3 && delta < 30 && !player.paused) {
-    logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
+  // Smooth sync: если небольшая дельта (0.3–1.5 сек), плавно подстраиваем скорость
+  if (delta > 0.3 && delta <= 1.5 && !player.paused) {
+    logOnce('Smooth sync (delta ' + delta.toFixed(2) + ')');
+    smoothSync(median, delta);
+  }
+  // Большой рассинхрон: jump, но сканим теперь каждую 1.5 секунды
+  else if (delta > 1.5 && delta < 30 && !player.paused) {
+    logOnce('Watchdog: Jump sync (delta ' + delta.toFixed(2) + ')');
     player.currentTime = median;
   }
-}, 7000);
+}, 1500);
 
 // --- Сокет-события ---
 socket.on('connect', () => {
@@ -275,23 +296,14 @@ function updateMembersList() {
 }
 
 // --- Синхронизация helper'ы ---
-function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
+function jumpTo(target, source = 'REMOTE') {
   ignoreSyncEvent = true;
-  if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-    const onLoaded = () => {
-      player.currentTime = target;
-      player.removeEventListener('loadeddata', onLoaded);
-      setTimeout(() => { ignoreSyncEvent = false; }, 150);
-    };
-    player.addEventListener('loadeddata', onLoaded);
-  } else {
-    player.currentTime = target;
-    setTimeout(() => { ignoreSyncEvent = false; }, 150);
-  }
+  player.currentTime = target;
+  setTimeout(() => { ignoreSyncEvent = false; }, 150);
   logOnce(`[SYNC] JUMP to ${target.toFixed(2)} (${source})`);
 }
 
-function syncPlayPause(paused, source = 'REMOTE') { // PATCH: source для лога
+function syncPlayPause(paused, source = 'REMOTE') {
   ignoreSyncEvent = true;
   if (paused) {
     player.pause();
@@ -306,15 +318,13 @@ function syncPlayPause(paused, source = 'REMOTE') { // PATCH: source для ло
 
 // --- Синхронизация main ---
 let firstSyncDone = false;
-
-// PATCH: stability — считаем, сколько раз подряд не приходит sync, предлагаем переподключение
 let lastPlanB = 0;
-let planBAttempts = 0; // PATCH: stability
+let planBAttempts = 0;
 function planB_RequestServerState() {
   const now = Date.now();
   if (now - lastPlanB < 4000) return;
   lastPlanB = now;
-  planBAttempts++; // PATCH: stability
+  planBAttempts++;
   if (planBAttempts > 3) {
     showStatus('Нет ответа от сервера. Переподключить?', '#f44', 'Переподключить', () => {
       location.reload();
@@ -336,7 +346,10 @@ function applySyncState(data) {
   const duration = player.duration || Infinity;
   const target   = Math.min(Math.max(raw, 0), duration);
 
-  if (Math.abs(player.currentTime - target) > 0.5) {
+  const diff = Math.abs(player.currentTime - target);
+  if (diff > 0.3 && diff <= 1.5) {
+    smoothSync(target, diff);
+  } else if (diff > 1.5) {
     jumpTo(target, 'REMOTE');
   }
 
@@ -352,7 +365,7 @@ function applySyncState(data) {
 }
 
 socket.on('sync_state', data => {
-  planBAttempts = 0; // PATCH: stability — сбрасываем при успешном sync
+  planBAttempts = 0;
   applySyncState(data);
   clearTimeout(syncErrorTimeout);
   syncErrorTimeout = setTimeout(() => {
@@ -362,8 +375,12 @@ socket.on('sync_state', data => {
   }, 1700);
 });
 
-// Надёжная отправка player_action
-function emitSyncState(source = 'USER') { // PATCH: метка для лога
+// Надёжная отправка player_action + антифлуд
+let lastEmitSync = 0;
+function emitSyncState(source = 'USER') {
+  const now = Date.now();
+  if (now - lastEmitSync < 500) return;
+  lastEmitSync = now;
   if (!player) return;
   socket.emit('player_action', {
     roomId,
@@ -374,7 +391,6 @@ function emitSyncState(source = 'USER') { // PATCH: метка для лога
 }
 
 // --- Обработка visibilitychange ---
-// PATCH: stability — при возвращении страницы, всегда делаем повторный запрос sync дважды
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     wasPausedOnHide = player.paused;
@@ -382,7 +398,7 @@ document.addEventListener('visibilitychange', () => {
   } else {
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
-    setTimeout(() => socket.emit('request_state', { roomId }), 1000); // PATCH: stability
+    setTimeout(() => socket.emit('request_state', { roomId }), 1000);
     if (!wasPausedOnHide) {
       player.play().catch(() => {});
     }
@@ -393,7 +409,7 @@ document.addEventListener('visibilitychange', () => {
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
-    if (!res.ok) throw new Error(res.status + ' ' + res.statusText); // PATCH: error msg
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
     const { movie_id } = await res.json();
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
@@ -429,7 +445,6 @@ async function fetchRoom() {
   } catch (err) {
     logError(err.message, err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${escapeHtml(err.message)}</p>`;
-    // PATCH: кнопка Попробовать снова
     showStatus('Ошибка при получении данных.', '#f44', 'Попробовать снова', () => {
       hideStatus();
       playerWrapper.innerHTML = '';
@@ -441,7 +456,7 @@ async function fetchRoom() {
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
-    if (!canUserAction()) return; // PATCH: антиспам
+    if (!canUserAction()) return;
     if (player.paused) player.play();
     else               player.pause();
     emitSyncState('USER');
@@ -461,15 +476,24 @@ function setupCustomControls() {
 
   // SCRUBBING
   let wasPlaying = false;
+  let isScrubbing = false;
   progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
+    isScrubbing = true;
   });
   progressSlider.addEventListener('input', () => {
     const pct = progressSlider.value / 100;
     player.currentTime = pct * player.duration;
   });
   progressSlider.addEventListener('mouseup', () => {
-    if (!canUserAction()) return; // PATCH: антиспам
+    isScrubbing = false;
+    emitSyncState('USER');
+    if (wasPlaying) player.play().catch(() => {});
+  });
+  // Touch events for mobile
+  progressSlider.addEventListener('touchstart', () => { isScrubbing = true; });
+  progressSlider.addEventListener('touchend', () => {
+    isScrubbing = false;
     emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
   });
