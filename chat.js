@@ -1,6 +1,13 @@
 // chat.js
 
-// ==== Чат: XSS, лимит длины, добавление сообщений, обработка ====
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"'`=\/]/g, function(s) {
+    return ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;',
+      '=': '&#61;', '/': '&#47;'
+    })[s];
+  });
+}
 
 function appendMessage(author, text) {
   const d = document.createElement('div');
@@ -9,7 +16,6 @@ function appendMessage(author, text) {
   messagesBox.appendChild(d);
   messagesBox.scrollTop = messagesBox.scrollHeight;
 }
-
 function appendSystemMessage(text) {
   const d = document.createElement('div');
   d.className = 'chat-message system-message';
@@ -32,8 +38,6 @@ function sendMessage() {
   socket.emit('chat_message', { roomId, author: 'Гость', text: t });
   msgInput.value = '';
 }
-
-// === Обработка socket событий ===
 
 socket.on('history', data => {
   messagesBox.innerHTML = '';

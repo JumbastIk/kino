@@ -1,12 +1,10 @@
 // player.js
 
-// Inline-видео для мобильных (обязательно для автоплея на iOS/Android)
 video.setAttribute('playsinline', '');
 video.setAttribute('webkit-playsinline', '');
 video.autoplay = true;
 video.muted    = true;
 
-// Контролы управления
 function enableControls() {
   [playPauseBtn, muteBtn, fullscreenBtn, progressContainer].forEach(el => {
     el.style.pointerEvents = '';
@@ -22,14 +20,13 @@ function disableControls() {
   progressSlider.disabled = true;
 }
 
-// Пользовательские контролы
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
     if (!canUserAction()) return;
     if (player.paused) player.play();
     else               player.pause();
-    if (typeof emitSyncState === 'function') emitSyncState('USER');
+    emitSyncState('USER');
   });
   muteBtn.addEventListener('click', () => {
     if (!readyForControl) return;
@@ -44,7 +41,6 @@ function setupCustomControls() {
     fn && fn.call(player);
   });
 
-  // Перемотка (scrubbing)
   let wasPlaying = false;
   progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
@@ -55,7 +51,7 @@ function setupCustomControls() {
   });
   progressSlider.addEventListener('mouseup', () => {
     if (!canUserAction()) return;
-    if (typeof emitSyncState === 'function') emitSyncState('USER');
+    emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
   });
 
@@ -79,7 +75,6 @@ function updateMuteIcon() {
   muteBtn.textContent = (player.muted || player.volume === 0) ? '🔇' : '🔊';
 }
 
-// Спиннер буферизации
 function showSpinner() {
   if (!spinner) {
     spinner = createSpinner();
@@ -98,7 +93,6 @@ function createSpinner() {
   return s;
 }
 
-// Только вызов и инициализация контролов
 window.addEventListener('DOMContentLoaded', () => {
   setupCustomControls();
 });

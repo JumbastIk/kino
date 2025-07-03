@@ -1,7 +1,12 @@
-// common.js
-
 // == BACKEND URL, RoomID ==
 const BACKEND = 'https://kino-fhwp.onrender.com';
+
+// ВАЖНО: socket создаём только здесь, он теперь глобальный!
+const socket = io(BACKEND, {
+  path: '/socket.io',
+  transports: ['websocket']
+});
+
 const params = new URLSearchParams(location.search);
 const roomId = params.get('roomId');
 
@@ -38,7 +43,6 @@ statusBar.style.fontSize = '15px';
 statusBar.style.borderRadius = '18px';
 statusBar.style.display = 'none';
 document.body.appendChild(statusBar);
-
 function showStatus(msg, color = '#ff9696', btnText = '', btnHandler = null) {
   statusBar.textContent = msg;
   statusBar.style.background = color;
