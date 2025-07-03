@@ -92,6 +92,9 @@ function canUserAction() {
   return true;
 }
 
+// PATCH: Grace period для Watchdog после JUMP
+let lastJumpAt = 0;
+
 // Для visibilitychange
 let wasPausedOnHide   = true;
 // Участники
@@ -173,7 +176,7 @@ function logError(msg, err) {
 // Логгер
 function logOnce(msg) {
   const now = Date.now();
-  if (now - lastSyncLog > 600) {
+  if (now - lastSyncLog > 300) {
     console.log(msg);
     lastSyncLog = now;
   }
@@ -206,7 +209,7 @@ socket.on('user_time_update', data => {
   }
 });
 
-// ===== 1.8. Watchdog автосинхронизация (деликатно) =====
+// ===== 1.8. Watchdog автосинхронизация (деликатно, c grace-периодом) =====
 function getMedianTime() {
   const times = Object.values(userTimeMap).filter(t => typeof t === 'number');
   if (!times.length) return player.currentTime;
@@ -216,11 +219,13 @@ function getMedianTime() {
 }
 setInterval(() => {
   if (!readyForControl) return;
+  // PATCH: Grace period после JUMP
+  if (Date.now() - lastJumpAt < 4000) return;
   const median = getMedianTime();
   const delta = Math.abs(player.currentTime - median);
   if (delta > 2.3 && delta < 10 && !player.paused) {
-    logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
-    player.currentTime = median;
+    logOnce('[SYNC][AUTO] Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
+    jumpTo(median, 'AUTO');
   }
 }, 7000);
 
@@ -276,6 +281,7 @@ function updateMembersList() {
 // --- Синхронизация helper'ы ---
 function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
+  lastJumpAt = Date.now(); // PATCH: фиксируем время JUMP для grace
   if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
       player.currentTime = target;
