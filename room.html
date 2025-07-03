@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Комната просмотра</title>
-  <link rel="stylesheet" href="style.css?v=1.4212112112212212112212212112212112413221212212121112211121221123212112112221121222112211212121212121152112121211222211211212422311212512234211122112312312132122149921231241352137979799129992112350.0" />
-  <link rel="stylesheet" href="room.css?v=1.3212112121122121212122121122112121124222212111212112112211122211212211212221212122211121212121123212211122211211252221211211322124121221251219219219212133122132199923421412327799121121450.0" />
+  <link rel="stylesheet" href="style.css?v=1.421211211221221212112212212112212112413221212212121112211121221123212112112221121222112211212121212121152112121211222211211212422311212512234211122112312312132122149921231241352137979799129992112350.0" />
+  <link rel="stylesheet" href="room.css?v=1.321211212112212112212122121122112121124222212111212112112211122211212211212221212122211121212121123212211122211211252221211211322124121221251219219219212133122132199923421412327799121121450.0" />
 </head>
 <body>
   <div class="room-container twitch-layout">
@@ -15,7 +15,6 @@
     <a id="backLink" href="index.html" class="back-link">← Назад к описанию</a>
     <div class="player-chat-wrap">
       <div class="player-section">
-        <!-- Новый player-wrapper -->
         <div class="player-wrapper" id="playerWrapper">
           <video id="videoPlayer" playsinline class="video-bg"></video>
           <div class="custom-video-controls" id="customControls" style="border-radius:0; padding:6px 0 4px 0; background:#23232c;">
@@ -23,9 +22,10 @@
               <svg id="iconPlay" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M7 6v12l10-6-10-6z" fill="currentColor"/></svg>
               <svg id="iconPause" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" style="display:none"><rect x="6" y="5" width="4" height="14" rx="2" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="2" fill="currentColor"/></svg>
             </button>
-            <div class="custom-time-box" style="display:flex;align-items:center;gap:1px;min-width:78px;font-variant-numeric:tabular-nums;font-size:16px;">
+            <!-- Время в одну строку -->
+            <div class="custom-time-box" style="display:flex;align-items:center;gap:2px;min-width:85px;font-variant-numeric:tabular-nums;font-size:16px;">
               <span class="custom-time" id="currentTimeLabel">0:00</span>
-              <span class="custom-slash" style="color:#888;margin:0 2px;">/</span>
+              <span class="custom-slash" style="color:#888;margin:0 3px;">/</span>
               <span class="custom-time" id="durationLabel" style="color:#aaa;">0:00</span>
             </div>
             <div class="custom-progress-container" id="progressContainer" style="flex:1;margin:0 8px;min-width:0;">
@@ -52,8 +52,7 @@
         <!-- Секция участников под ID комнаты -->
         <div class="room-members-section">
           <span>Участники:</span>
-          <ul id="membersList" class="members-list">
-          </ul>
+          <ul id="membersList" class="members-list"></ul>
         </div>
         <!-- ===== Чат ===== -->
         <div class="chat-bottom" id="chatBottom">
@@ -71,13 +70,12 @@
       </div>
     </div>
   </div>
-
   <!-- Скрипты -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script src="data.js?v=1.0.421213312221112222121212112222111124112122121112212121221111212221211122122112112221212121211342152121231212121122123211122121221221121211212112121221422121322131213397797346346436119992240"></script>
-  <script src="room.js?v=1.0.324122121012121212112221222111121212412121212221211221121111221212212121112221122212121112124121212122125321221212112121321121212214122212113221212211212212123312131213797912542353465436132999991123213"></script>
+  <script src="data.js?v=1.0.42121331222112112222121212112222111124112122121112212121221111212221211122122112112221212121211342152121231212121122123211122121221221121211212112121221422121322131213397797346346436119992240"></script>
+  <script src="room.js?v=1.0.32412212101212121212112221222111121212412121212221211221121111221212212121112221122212121112124121212122125321221212112121321121212214122212113221212211212212123312131213797912542353465436132999991123213"></script>
 </body>
 </html>
