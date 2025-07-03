@@ -1,13 +1,6 @@
 // room.js
 
-// Импортируем common, player, chat (подключаются в html через <script>)
-/*
-<script src="common.js"></script>
-<script src="player.js"></script>
-<script src="chat.js"></script>
-<script src="room.js"></script>
-*/
-
+// Проверка наличия roomId
 const params = new URLSearchParams(location.search);
 const roomId = params.get('roomId');
 if (!roomId) {
@@ -15,7 +8,7 @@ if (!roomId) {
   location.href = 'index.html';
 }
 
-// Показываем ID комнаты
+// Показать ID комнаты
 if (window.roomIdCode) roomIdCode.textContent = roomId;
 if (window.copyRoomId) copyRoomId.onclick = () => {
   navigator.clipboard.writeText(roomId);
@@ -28,8 +21,7 @@ if (window.Telegram?.WebApp) {
   Telegram.WebApp.enableClosingConfirmation();
 }
 
-// --- События сокета, glue между player/chat/common ---
-// Здесь используются только функции, которые уже были вынесены
+// --- События сокета и интеграция функций из других файлов ---
 socket.on('connect', () => {
   myUserId = socket.id;
   readyForControl = false;

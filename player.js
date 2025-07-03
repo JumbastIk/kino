@@ -1,9 +1,5 @@
 // player.js
 
-// --- DOM-элементы (нужны на странице) ---
-// Пусть элементы приходят из index.html или подключаются через window/глобально
-// (например, window.playerWrapper, window.video, и т.д.)
-
 // Inline-видео для мобильных (обязательно для автоплея на iOS/Android)
 video.setAttribute('playsinline', '');
 video.setAttribute('webkit-playsinline', '');
@@ -30,10 +26,10 @@ function disableControls() {
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
-    if (!canUserAction()) return; // антиспам
+    if (!canUserAction()) return;
     if (player.paused) player.play();
     else               player.pause();
-    emitSyncState('USER');
+    if (typeof emitSyncState === 'function') emitSyncState('USER');
   });
   muteBtn.addEventListener('click', () => {
     if (!readyForControl) return;
@@ -58,8 +54,8 @@ function setupCustomControls() {
     player.currentTime = pct * player.duration;
   });
   progressSlider.addEventListener('mouseup', () => {
-    if (!canUserAction()) return; // антиспам
-    emitSyncState('USER');
+    if (!canUserAction()) return;
+    if (typeof emitSyncState === 'function') emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
   });
 
@@ -102,16 +98,7 @@ function createSpinner() {
   return s;
 }
 
-function formatTime(t) {
-  t = Math.floor(t || 0);
-  if (t >= 3600) {
-    return `${Math.floor(t/3600)}:${String(Math.floor((t%3600)/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
-  }
-  return `${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
-}
-
-// Вызов и инициализация при старте
+// Только вызов и инициализация контролов
 window.addEventListener('DOMContentLoaded', () => {
   setupCustomControls();
-  // и любые другие инит-функции
 });
