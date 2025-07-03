@@ -22,6 +22,7 @@ const progressSlider    = document.getElementById('progressSlider');
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
 const currentTimeLabel  = document.getElementById('currentTimeLabel');
+const leftTimeLabel     = document.getElementById('leftTimeLabel'); // новый label
 const durationLabel     = document.getElementById('durationLabel');
 const messagesBox       = document.getElementById('messages');
 const membersList       = document.getElementById('membersList');
@@ -30,6 +31,12 @@ const sendBtn           = document.getElementById('sendBtn');
 const backLink          = document.getElementById('backLink');
 const roomIdCode        = document.getElementById('roomIdCode');
 const copyRoomId        = document.getElementById('copyRoomId');
+
+// SVG icons
+const iconPlay    = document.getElementById('iconPlay');
+const iconPause   = document.getElementById('iconPause');
+const iconVolOn   = document.getElementById('iconVolOn');
+const iconVolOff  = document.getElementById('iconVolOff');
 
 // ===== Индикатор статуса соединения =====
 const statusBar = document.createElement('div');
@@ -417,11 +424,14 @@ async function fetchRoom() {
       player = video;
       socket.emit('request_state', { roomId });
       durationLabel.textContent = formatTime(player.duration || 0);
+      updateTimeLabels();
     });
 
     video.addEventListener('timeupdate', updateProgressBar);
+    video.addEventListener('timeupdate', updateTimeLabels);
     video.addEventListener('durationchange', () => {
       durationLabel.textContent = formatTime(player.duration || 0);
+      updateTimeLabels();
     });
 
     setupCustomControls();
@@ -467,6 +477,7 @@ function setupCustomControls() {
   progressSlider.addEventListener('input', () => {
     const pct = progressSlider.value / 100;
     player.currentTime = pct * player.duration;
+    updateTimeLabels();
   });
   progressSlider.addEventListener('mouseup', () => {
     if (!canUserAction()) return; // PATCH: антиспам
@@ -477,6 +488,11 @@ function setupCustomControls() {
   player.addEventListener('play', updatePlayIcon);
   player.addEventListener('pause', updatePlayIcon);
   player.addEventListener('volumechange', updateMuteIcon);
+
+  // Сразу обновить иконки на текущие
+  updatePlayIcon();
+  updateMuteIcon();
+  updateTimeLabels();
 }
 
 function updateProgressBar() {
@@ -484,14 +500,35 @@ function updateProgressBar() {
   const pct = (player.currentTime / player.duration) * 100;
   progressBar.style.width = pct + '%';
   progressSlider.value    = pct;
-  currentTimeLabel.textContent = formatTime(player.currentTime);
 }
 
 function updatePlayIcon() {
-  playPauseBtn.textContent = player.paused ? '▶️' : '⏸️';
+  if (!iconPlay || !iconPause) return;
+  if (player.paused) {
+    iconPlay.style.display = '';
+    iconPause.style.display = 'none';
+  } else {
+    iconPlay.style.display = 'none';
+    iconPause.style.display = '';
+  }
 }
 function updateMuteIcon() {
-  muteBtn.textContent = (player.muted || player.volume === 0) ? '🔇' : '🔊';
+  if (!iconVolOn || !iconVolOff) return;
+  if (player.muted || player.volume === 0) {
+    iconVolOn.style.display = 'none';
+    iconVolOff.style.display = '';
+  } else {
+    iconVolOn.style.display = '';
+    iconVolOff.style.display = 'none';
+  }
+}
+
+function updateTimeLabels() {
+  if (!leftTimeLabel) return;
+  currentTimeLabel.textContent = formatTime(player.currentTime);
+  // Осталось
+  const remain = Math.max(0, (player.duration || 0) - player.currentTime);
+  leftTimeLabel.textContent = '-' + formatTime(remain);
 }
 
 function showSpinner() {
