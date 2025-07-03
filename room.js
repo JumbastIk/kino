@@ -18,7 +18,6 @@ const video             = document.getElementById('videoPlayer');
 const playPauseBtn      = document.getElementById('playPauseBtn');
 const muteBtn           = document.getElementById('muteBtn');
 const fullscreenBtn     = document.getElementById('fullscreenBtn');
-// Ползунок прогресса
 const progressSlider    = document.getElementById('progressSlider');
 const progressContainer = document.getElementById('progressContainer');
 const progressBar       = document.getElementById('progressBar');
@@ -46,10 +45,24 @@ statusBar.style.fontSize = '15px';
 statusBar.style.borderRadius = '18px';
 statusBar.style.display = 'none';
 document.body.appendChild(statusBar);
-function showStatus(msg, color = '#ff9696') {
+function showStatus(msg, color = '#ff9696', btnText = '', onClick = null) {
   statusBar.textContent = msg;
   statusBar.style.background = color;
   statusBar.style.display = '';
+  // Добавляем кнопку "Попробовать снова"
+  if (btnText && typeof onClick === 'function') {
+    const btn = document.createElement('button');
+    btn.textContent = btnText;
+    btn.style.marginLeft = '15px';
+    btn.style.background = '#fff2';
+    btn.style.border = 'none';
+    btn.style.borderRadius = '8px';
+    btn.style.padding = '2px 10px';
+    btn.style.color = '#ffb';
+    btn.style.cursor = 'pointer';
+    btn.onclick = onClick;
+    statusBar.appendChild(btn);
+  }
 }
 function hideStatus() {
   statusBar.style.display = 'none';
@@ -148,13 +161,9 @@ function logError(msg, err) {
   console.error('[Room Error]', msg, err || '');
 }
 
-// Логгер
+// Логгер (убираю все логи кроме ошибок!)
 function logOnce(msg) {
-  const now = Date.now();
-  if (now - lastSyncLog > 600) {
-    console.log(msg);
-    lastSyncLog = now;
-  }
+  // Ничего не выводим!
 }
 
 // Пинг
@@ -196,8 +205,7 @@ setInterval(() => {
   if (!readyForControl) return;
   const median = getMedianTime();
   const delta = Math.abs(player.currentTime - median);
-  if (delta > 2.3 && delta < 10 && !player.paused) { // аккуратно, не перескакивать сотни секунд
-    logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
+  if (delta > 2.3 && delta < 10 && !player.paused) {
     player.currentTime = median;
   }
 }, 7000);
@@ -252,9 +260,16 @@ function updateMembersList() {
 }
 
 // --- Синхронизация helper'ы ---
+// === 2. Анти-спам: throttle на play/pause/seek 300мс ===
+let lastActionTime = 0;
+function canEmitSync() {
+  const now = Date.now();
+  if (now - lastActionTime < 300) return false;
+  lastActionTime = now;
+  return true;
+}
 function jumpTo(target) {
   ignoreSyncEvent = true;
-  // ждем хотя бы первого фрейма
   if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
       player.currentTime = target;
@@ -266,7 +281,6 @@ function jumpTo(target) {
     player.currentTime = target;
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
   }
-  logOnce(`[SYNC] JUMP to ${target.toFixed(2)}`);
 }
 
 function syncPlayPause(paused) {
@@ -288,11 +302,9 @@ function applySyncState(data) {
   if (!metadataReady) return;
   if (!player.muted) player.muted = true;
 
-  // корректируем delta
   let delta = (Date.now() - data.updatedAt) / 1000;
   if (delta < 0) delta = 0;
 
-  // считаем target
   const raw = data.is_paused
             ? data.position
             : data.position + delta;
@@ -335,12 +347,12 @@ socket.on('sync_state', data => {
 // Надёжная отправка player_action
 function emitSyncState() {
   if (!player) return;
+  if (!canEmitSync()) return; // throttle
   socket.emit('player_action', {
     roomId,
     position: player.currentTime,
     is_paused: player.paused
   });
-  logOnce(`[EMIT] pos=${player.currentTime.toFixed(2)} paused=${player.paused}`);
 }
 
 // --- Обработка visibilitychange ---
@@ -361,7 +373,9 @@ document.addEventListener('visibilitychange', () => {
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
-    if (!res.ok) throw new Error(res.status);
+    if (!res.ok) {
+      throw new Error(res.status + ' ' + res.statusText);
+    }
     const { movie_id } = await res.json();
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
@@ -395,14 +409,21 @@ async function fetchRoom() {
     setupCustomControls();
     showSpinner();
   } catch (err) {
+    // === 1. Ошибка fetch/переподключения с кнопкой ===
     logError(err.message, err);
-    playerWrapper.innerHTML = `<p class="error">Ошибка: ${err.message}</p>`;
+    playerWrapper.innerHTML = `<p class="error">Ошибка: ${escapeHtml(err.message)}</p>`;
+    showStatus('Ошибка при получении данных. ', '#f44', 'Попробовать снова', () => {
+      hideStatus();
+      playerWrapper.innerHTML = '';
+      fetchRoom();
+    });
   }
 }
 
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
+    if (!canEmitSync()) return; // throttle click
     if (player.paused) player.play();
     else               player.pause();
     emitSyncState();
@@ -422,12 +443,18 @@ function setupCustomControls() {
 
   // SCRUBBING
   let wasPlaying = false;
+  let scrubTimeout = null;
   progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
   });
   progressSlider.addEventListener('input', () => {
     const pct = progressSlider.value / 100;
     player.currentTime = pct * player.duration;
+    // throttle emit on drag
+    if (scrubTimeout) clearTimeout(scrubTimeout);
+    scrubTimeout = setTimeout(() => {
+      emitSyncState();
+    }, 300);
   });
   progressSlider.addEventListener('mouseup', () => {
     emitSyncState();
