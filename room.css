@@ -60,7 +60,7 @@ button, select {
   min-height: 100vh;
   box-sizing: border-box;
   background: #18181b;
-  padding-top: 48px; /* Было 64px, стало 48px — меньше серого сверху */
+  padding-top: 48px;
 }
 .player-chat-wrap {
   display: flex;
@@ -75,7 +75,7 @@ button, select {
   flex-direction: column;
   align-items: center;
   position: relative;
-  margin-top: 0 !important; /* чтобы не было лишнего отступа сверху */
+  margin-top: 0 !important;
 }
 
 /* ===== Видео ===== */
@@ -85,20 +85,20 @@ button, select {
   max-width: 1080px;
   aspect-ratio: 16/9;
   background: #060606;
-  border-radius: 0 !important; /* Прямоугольный плеер */
+  border-radius: 0 !important;
   overflow: hidden;
   box-shadow: 0 6px 36px #000c, 0 2px 14px #4e297b38;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 17px;
-  margin-top: 0 !important; /* Убираем серое сверху */
+  margin-top: 0 !important;
 }
 #videoPlayer {
   width: 100%;
   height: 100%;
   background: #000;
-  border-radius: 0 !important; /* Прямоугольный */
+  border-radius: 0 !important;
   outline: none;
   display: block;
 }
@@ -109,8 +109,8 @@ button, select {
   left: 0; right: 0; bottom: 0;
   width: 100%;
   z-index: 8;
-  background: linear-gradient(0deg,rgba(15,15,30,0.89) 70%,rgba(36,36,48,0.02) 100%);
-  padding: 14px 20px 10px 20px; /* стало меньше серого, компактнее */
+  background: rgba(36, 35, 48, 0.7); /* ПРОЗРАЧНОСТЬ 70% */
+  padding: 14px 20px 10px 20px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -512,7 +512,6 @@ button, select {
 
 /* ====== Идеальная мобильная адаптация ====== */
 @media (max-width: 950px) {
-  /* общий лэйаут */
   .player-chat-wrap {
     flex-direction: column;
     align-items: center;
@@ -546,26 +545,22 @@ button, select {
     border-radius: 11px;
     min-width: 40px;
   }
-
-  /* video-controls */
   .custom-video-controls {
     border-radius: 0 0 0 0 !important;
     padding: 6px 5px 4px 5px;
     gap: 4px;
     min-height: 36px;
+    background: rgba(36, 35, 48, 0.7); /* Mobile тоже 70% */
   }
-
   .custom-video-controls .custom-btn {
     font-size: 18px;
     padding: 6px 8px;
   }
-
   .custom-progress-container {
     flex: 1 1 auto;
     max-width: calc(100% - 100px);
     margin: 0 6px;
   }
-
   .custom-time-block { min-width: 70px; font-size: 13px; }
   .custom-time, #leftTimeLabel { font-size: 13px; min-width: 31px; }
   .custom-time-slash { font-size: 13px; }
