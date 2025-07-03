@@ -92,9 +92,6 @@ function canUserAction() {
   return true;
 }
 
-// PATCH: Grace period для Watchdog после JUMP
-let lastJumpAt = 0;
-
 // Для visibilitychange
 let wasPausedOnHide   = true;
 // Участники
@@ -176,7 +173,7 @@ function logError(msg, err) {
 // Логгер
 function logOnce(msg) {
   const now = Date.now();
-  if (now - lastSyncLog > 300) {
+  if (now - lastSyncLog > 600) {
     console.log(msg);
     lastSyncLog = now;
   }
@@ -209,7 +206,7 @@ socket.on('user_time_update', data => {
   }
 });
 
-// ===== 1.8. Watchdog автосинхронизация (деликатно, c grace-периодом) =====
+// ===== 1.8. Watchdog автосинхронизация (деликатно) =====
 function getMedianTime() {
   const times = Object.values(userTimeMap).filter(t => typeof t === 'number');
   if (!times.length) return player.currentTime;
@@ -219,13 +216,11 @@ function getMedianTime() {
 }
 setInterval(() => {
   if (!readyForControl) return;
-  // PATCH: Grace period после JUMP
-  if (Date.now() - lastJumpAt < 4000) return;
   const median = getMedianTime();
   const delta = Math.abs(player.currentTime - median);
   if (delta > 2.3 && delta < 10 && !player.paused) {
-    logOnce('[SYNC][AUTO] Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
-    jumpTo(median, 'AUTO');
+    logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
+    player.currentTime = median;
   }
 }, 7000);
 
@@ -281,7 +276,6 @@ function updateMembersList() {
 // --- Синхронизация helper'ы ---
 function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
-  lastJumpAt = Date.now(); // PATCH: фиксируем время JUMP для grace
   if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
       player.currentTime = target;
@@ -432,42 +426,68 @@ async function fetchRoom() {
   }
 }
 
+// === Патч обработчиков для setupCustomControls ===
+let playPauseHandler, muteHandler, fullscreenHandler, progressMouseDownHandler, progressInputHandler, progressMouseUpHandler;
+
 function setupCustomControls() {
-  playPauseBtn.addEventListener('click', () => {
+  // --- playPauseBtn ---
+  if (playPauseHandler) playPauseBtn.removeEventListener('click', playPauseHandler);
+  playPauseHandler = function() {
     if (!readyForControl) return;
     if (!canUserAction()) return; // PATCH: антиспам
     if (player.paused) player.play();
     else               player.pause();
     emitSyncState('USER');
-  });
-  muteBtn.addEventListener('click', () => {
+  };
+  playPauseBtn.addEventListener('click', playPauseHandler);
+
+  // --- muteBtn ---
+  if (muteHandler) muteBtn.removeEventListener('click', muteHandler);
+  muteHandler = function() {
     if (!readyForControl) return;
     player.muted = !player.muted;
     updateMuteIcon();
-  });
-  fullscreenBtn.addEventListener('click', () => {
+  };
+  muteBtn.addEventListener('click', muteHandler);
+
+  // --- fullscreenBtn ---
+  if (fullscreenHandler) fullscreenBtn.removeEventListener('click', fullscreenHandler);
+  fullscreenHandler = function() {
     if (!readyForControl) return;
     const fn = player.requestFullscreen
              || player.webkitRequestFullscreen
              || player.msRequestFullscreen;
     fn && fn.call(player);
-  });
+  };
+  fullscreenBtn.addEventListener('click', fullscreenHandler);
 
-  // SCRUBBING
+  // --- SCRUBBING для progressSlider ---
+  if (progressMouseDownHandler) progressSlider.removeEventListener('mousedown', progressMouseDownHandler);
+  if (progressInputHandler)     progressSlider.removeEventListener('input', progressInputHandler);
+  if (progressMouseUpHandler)   progressSlider.removeEventListener('mouseup', progressMouseUpHandler);
+
   let wasPlaying = false;
-  progressSlider.addEventListener('mousedown', () => {
+  progressMouseDownHandler = function() {
     wasPlaying = !player.paused;
-  });
-  progressSlider.addEventListener('input', () => {
+  };
+  progressInputHandler = function() {
     const pct = progressSlider.value / 100;
     player.currentTime = pct * player.duration;
-  });
-  progressSlider.addEventListener('mouseup', () => {
+  };
+  progressMouseUpHandler = function() {
     if (!canUserAction()) return; // PATCH: антиспам
     emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
-  });
+  };
 
+  progressSlider.addEventListener('mousedown', progressMouseDownHandler);
+  progressSlider.addEventListener('input', progressInputHandler);
+  progressSlider.addEventListener('mouseup', progressMouseUpHandler);
+
+  // --- play/pause/mute иконки ---
+  player.removeEventListener('play', updatePlayIcon);
+  player.removeEventListener('pause', updatePlayIcon);
+  player.removeEventListener('volumechange', updateMuteIcon);
   player.addEventListener('play', updatePlayIcon);
   player.addEventListener('pause', updatePlayIcon);
   player.addEventListener('volumechange', updateMuteIcon);
