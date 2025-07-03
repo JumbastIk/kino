@@ -65,6 +65,10 @@ socket.on('sync_state', data => {
       if (typeof planB_RequestServerState === 'function') planB_RequestServerState();
     }
   }, 1700);
+
+  // --- ВАЖНО: Разблокировать плеер после sync ---
+  readyForControl = true;
+  if (typeof enableControls === 'function') enableControls();
 });
 
 // === Пинг ===
