@@ -426,68 +426,42 @@ async function fetchRoom() {
   }
 }
 
-// === Патч обработчиков для setupCustomControls ===
-let playPauseHandler, muteHandler, fullscreenHandler, progressMouseDownHandler, progressInputHandler, progressMouseUpHandler;
-
 function setupCustomControls() {
-  // --- playPauseBtn ---
-  if (playPauseHandler) playPauseBtn.removeEventListener('click', playPauseHandler);
-  playPauseHandler = function() {
+  playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
     if (!canUserAction()) return; // PATCH: антиспам
     if (player.paused) player.play();
     else               player.pause();
     emitSyncState('USER');
-  };
-  playPauseBtn.addEventListener('click', playPauseHandler);
-
-  // --- muteBtn ---
-  if (muteHandler) muteBtn.removeEventListener('click', muteHandler);
-  muteHandler = function() {
+  });
+  muteBtn.addEventListener('click', () => {
     if (!readyForControl) return;
     player.muted = !player.muted;
     updateMuteIcon();
-  };
-  muteBtn.addEventListener('click', muteHandler);
-
-  // --- fullscreenBtn ---
-  if (fullscreenHandler) fullscreenBtn.removeEventListener('click', fullscreenHandler);
-  fullscreenHandler = function() {
+  });
+  fullscreenBtn.addEventListener('click', () => {
     if (!readyForControl) return;
     const fn = player.requestFullscreen
              || player.webkitRequestFullscreen
              || player.msRequestFullscreen;
     fn && fn.call(player);
-  };
-  fullscreenBtn.addEventListener('click', fullscreenHandler);
+  });
 
-  // --- SCRUBBING для progressSlider ---
-  if (progressMouseDownHandler) progressSlider.removeEventListener('mousedown', progressMouseDownHandler);
-  if (progressInputHandler)     progressSlider.removeEventListener('input', progressInputHandler);
-  if (progressMouseUpHandler)   progressSlider.removeEventListener('mouseup', progressMouseUpHandler);
-
+  // SCRUBBING
   let wasPlaying = false;
-  progressMouseDownHandler = function() {
+  progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
-  };
-  progressInputHandler = function() {
+  });
+  progressSlider.addEventListener('input', () => {
     const pct = progressSlider.value / 100;
     player.currentTime = pct * player.duration;
-  };
-  progressMouseUpHandler = function() {
+  });
+  progressSlider.addEventListener('mouseup', () => {
     if (!canUserAction()) return; // PATCH: антиспам
     emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
-  };
+  });
 
-  progressSlider.addEventListener('mousedown', progressMouseDownHandler);
-  progressSlider.addEventListener('input', progressInputHandler);
-  progressSlider.addEventListener('mouseup', progressMouseUpHandler);
-
-  // --- play/pause/mute иконки ---
-  player.removeEventListener('play', updatePlayIcon);
-  player.removeEventListener('pause', updatePlayIcon);
-  player.removeEventListener('volumechange', updateMuteIcon);
   player.addEventListener('play', updatePlayIcon);
   player.addEventListener('pause', updatePlayIcon);
   player.addEventListener('volumechange', updateMuteIcon);
