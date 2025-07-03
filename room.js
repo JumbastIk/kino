@@ -218,21 +218,12 @@ setInterval(() => {
   if (!readyForControl) return;
   const median = getMedianTime();
   const delta = Math.abs(player.currentTime - median);
-  if (delta > 2.3 && delta < 10 && !player.paused) {
+  // PATCH: stability — расширен диапазон "большой" рассинхры, чтобы sync всегда ловился
+  if (delta > 2.3 && delta < 30 && !player.paused) {
     logOnce('Watchdog: Автосинхронизация (дельта ' + delta.toFixed(2) + ' сек.)');
     player.currentTime = median;
   }
 }, 7000);
-
-// ====== PATCH: автосброс ignoreSyncEvent ======
-let lastSyncEvent = Date.now();
-setInterval(() => {
-  // Если больше 10 секунд не было sync/jumpTo — сбросить ignoreSyncEvent (он залип!)
-  if (ignoreSyncEvent && Date.now() - lastSyncEvent > 10000) {
-    ignoreSyncEvent = false;
-    logOnce('[PATCH] Force reset ignoreSyncEvent (auto)');
-  }
-}, 4000);
 
 // --- Сокет-события ---
 socket.on('connect', () => {
@@ -286,7 +277,6 @@ function updateMembersList() {
 // --- Синхронизация helper'ы ---
 function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
-  lastSyncEvent = Date.now();
   if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     const onLoaded = () => {
       player.currentTime = target;
@@ -303,7 +293,6 @@ function jumpTo(target, source = 'REMOTE') { // PATCH: source для лога
 
 function syncPlayPause(paused, source = 'REMOTE') { // PATCH: source для лога
   ignoreSyncEvent = true;
-  lastSyncEvent = Date.now();
   if (paused) {
     player.pause();
     setTimeout(() => { ignoreSyncEvent = false; }, 150);
@@ -317,6 +306,22 @@ function syncPlayPause(paused, source = 'REMOTE') { // PATCH: source для ло
 
 // --- Синхронизация main ---
 let firstSyncDone = false;
+
+// PATCH: stability — считаем, сколько раз подряд не приходит sync, предлагаем переподключение
+let lastPlanB = 0;
+let planBAttempts = 0; // PATCH: stability
+function planB_RequestServerState() {
+  const now = Date.now();
+  if (now - lastPlanB < 4000) return;
+  lastPlanB = now;
+  planBAttempts++; // PATCH: stability
+  if (planBAttempts > 3) {
+    showStatus('Нет ответа от сервера. Переподключить?', '#f44', 'Переподключить', () => {
+      location.reload();
+    });
+  }
+  socket.emit('request_state', { roomId });
+}
 
 function applySyncState(data) {
   if (!metadataReady) return;
@@ -346,15 +351,8 @@ function applySyncState(data) {
   enableControls();
 }
 
-let lastPlanB = 0;
-function planB_RequestServerState() {
-  const now = Date.now();
-  if (now - lastPlanB < 4000) return;
-  lastPlanB = now;
-  socket.emit('request_state', { roomId });
-}
-
 socket.on('sync_state', data => {
+  planBAttempts = 0; // PATCH: stability — сбрасываем при успешном sync
   applySyncState(data);
   clearTimeout(syncErrorTimeout);
   syncErrorTimeout = setTimeout(() => {
@@ -376,6 +374,7 @@ function emitSyncState(source = 'USER') { // PATCH: метка для лога
 }
 
 // --- Обработка visibilitychange ---
+// PATCH: stability — при возвращении страницы, всегда делаем повторный запрос sync дважды
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     wasPausedOnHide = player.paused;
@@ -383,6 +382,7 @@ document.addEventListener('visibilitychange', () => {
   } else {
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
+    setTimeout(() => socket.emit('request_state', { roomId }), 1000); // PATCH: stability
     if (!wasPausedOnHide) {
       player.play().catch(() => {});
     }
