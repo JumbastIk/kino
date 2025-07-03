@@ -206,7 +206,7 @@ socket.on('user_time_update', data => {
   }
 });
 
-// ===== Синхронизация: улучшенный watchdog и smooth sync =====
+// ===== 1.8. Watchdog автосинхронизация (деликатно, теперь smooth sync) =====
 function getMedianTime() {
   const times = Object.values(userTimeMap).filter(t => typeof t === 'number');
   if (!times.length) return player.currentTime;
@@ -215,33 +215,29 @@ function getMedianTime() {
   return times.length % 2 === 0 ? (times[mid - 1] + times[mid]) / 2 : times[mid];
 }
 
-function smoothSync(target, maxDuration = 1.5) {
-  // Если рассинхрон до 1.5 сек — плавно корректируем playbackRate
-  const diff = target - player.currentTime;
-  if (Math.abs(diff) < 0.3) return; // ничего не делать
-  let originalRate = 1;
-  let speed = diff > 0 ? 1.07 : 0.93;
-  let duration = Math.min(Math.abs(diff), maxDuration);
-
-  player.playbackRate = speed;
+function smoothSync(target, delta) {
+  // Плавная корректировка playbackRate для дельты 0.3–1.5 сек
+  if (Math.abs(delta) < 0.3 || Math.abs(delta) > 1.5) return;
+  let rate = delta > 0 ? 1.07 : 0.93;
+  let timeout = Math.min(1500, Math.abs(delta * 1000));
+  let oldRate = player.playbackRate;
+  player.playbackRate = rate;
   setTimeout(() => {
-    player.playbackRate = originalRate;
-    player.currentTime = target; // гарантируем sync
-  }, duration * 1000);
+    player.playbackRate = oldRate;
+    player.currentTime = target; // финальная коррекция
+  }, timeout);
 }
 
+// *** Патч: синк теперь раз в 1.5 сек и smooth sync ***
 setInterval(() => {
   if (!readyForControl) return;
   const median = getMedianTime();
-  const delta = Math.abs(player.currentTime - median);
-  // Smooth sync: если небольшая дельта (0.3–1.5 сек), плавно подстраиваем скорость
-  if (delta > 0.3 && delta <= 1.5 && !player.paused) {
+  const delta = player.currentTime - median;
+  if (Math.abs(delta) > 0.3 && Math.abs(delta) <= 1.5 && !player.paused) {
     logOnce('Smooth sync (delta ' + delta.toFixed(2) + ')');
     smoothSync(median, delta);
-  }
-  // Большой рассинхрон: jump, но сканим теперь каждую 1.5 секунды
-  else if (delta > 1.5 && delta < 30 && !player.paused) {
-    logOnce('Watchdog: Jump sync (delta ' + delta.toFixed(2) + ')');
+  } else if (Math.abs(delta) > 1.5 && Math.abs(delta) < 30 && !player.paused) {
+    logOnce('Watchdog: Автосинхронизация (delta ' + delta.toFixed(2) + ' сек.)');
     player.currentTime = median;
   }
 }, 1500);
@@ -298,8 +294,17 @@ function updateMembersList() {
 // --- Синхронизация helper'ы ---
 function jumpTo(target, source = 'REMOTE') {
   ignoreSyncEvent = true;
-  player.currentTime = target;
-  setTimeout(() => { ignoreSyncEvent = false; }, 150);
+  if (player.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    const onLoaded = () => {
+      player.currentTime = target;
+      player.removeEventListener('loadeddata', onLoaded);
+      setTimeout(() => { ignoreSyncEvent = false; }, 150);
+    };
+    player.addEventListener('loadeddata', onLoaded);
+  } else {
+    player.currentTime = target;
+    setTimeout(() => { ignoreSyncEvent = false; }, 150);
+  }
   logOnce(`[SYNC] JUMP to ${target.toFixed(2)} (${source})`);
 }
 
@@ -318,13 +323,15 @@ function syncPlayPause(paused, source = 'REMOTE') {
 
 // --- Синхронизация main ---
 let firstSyncDone = false;
+
+// PATCH: stability — считаем, сколько раз подряд не приходит sync, предлагаем переподключение
 let lastPlanB = 0;
-let planBAttempts = 0;
+let planBAttempts = 0; // PATCH: stability
 function planB_RequestServerState() {
   const now = Date.now();
   if (now - lastPlanB < 4000) return;
   lastPlanB = now;
-  planBAttempts++;
+  planBAttempts++; // PATCH: stability
   if (planBAttempts > 3) {
     showStatus('Нет ответа от сервера. Переподключить?', '#f44', 'Переподключить', () => {
       location.reload();
@@ -365,7 +372,7 @@ function applySyncState(data) {
 }
 
 socket.on('sync_state', data => {
-  planBAttempts = 0;
+  planBAttempts = 0; // PATCH: stability — сбрасываем при успешном sync
   applySyncState(data);
   clearTimeout(syncErrorTimeout);
   syncErrorTimeout = setTimeout(() => {
@@ -375,7 +382,7 @@ socket.on('sync_state', data => {
   }, 1700);
 });
 
-// Надёжная отправка player_action + антифлуд
+// Надёжная отправка player_action (антифлуд — минимум 500мс)
 let lastEmitSync = 0;
 function emitSyncState(source = 'USER') {
   const now = Date.now();
@@ -398,7 +405,7 @@ document.addEventListener('visibilitychange', () => {
   } else {
     ignoreSyncEvent = false;
     socket.emit('request_state', { roomId });
-    setTimeout(() => socket.emit('request_state', { roomId }), 1000);
+    setTimeout(() => socket.emit('request_state', { roomId }), 1000); // PATCH: stability
     if (!wasPausedOnHide) {
       player.play().catch(() => {});
     }
@@ -409,7 +416,7 @@ document.addEventListener('visibilitychange', () => {
 async function fetchRoom() {
   try {
     const res = await fetch(`${BACKEND}/api/rooms/${roomId}`);
-    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText); // PATCH: error msg
     const { movie_id } = await res.json();
     const movie = movies.find(m => m.id === movie_id);
     if (!movie?.videoUrl) throw new Error('Фильм не найден');
@@ -445,6 +452,7 @@ async function fetchRoom() {
   } catch (err) {
     logError(err.message, err);
     playerWrapper.innerHTML = `<p class="error">Ошибка: ${escapeHtml(err.message)}</p>`;
+    // PATCH: кнопка Попробовать снова
     showStatus('Ошибка при получении данных.', '#f44', 'Попробовать снова', () => {
       hideStatus();
       playerWrapper.innerHTML = '';
@@ -456,7 +464,7 @@ async function fetchRoom() {
 function setupCustomControls() {
   playPauseBtn.addEventListener('click', () => {
     if (!readyForControl) return;
-    if (!canUserAction()) return;
+    if (!canUserAction()) return; // PATCH: антиспам
     if (player.paused) player.play();
     else               player.pause();
     emitSyncState('USER');
@@ -476,24 +484,24 @@ function setupCustomControls() {
 
   // SCRUBBING
   let wasPlaying = false;
-  let isScrubbing = false;
   progressSlider.addEventListener('mousedown', () => {
     wasPlaying = !player.paused;
-    isScrubbing = true;
   });
   progressSlider.addEventListener('input', () => {
     const pct = progressSlider.value / 100;
     player.currentTime = pct * player.duration;
   });
   progressSlider.addEventListener('mouseup', () => {
-    isScrubbing = false;
+    if (!canUserAction()) return;
     emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
   });
-  // Touch events for mobile
-  progressSlider.addEventListener('touchstart', () => { isScrubbing = true; });
+
+  // Touch for mobile
+  progressSlider.addEventListener('touchstart', () => {
+    wasPlaying = !player.paused;
+  });
   progressSlider.addEventListener('touchend', () => {
-    isScrubbing = false;
     emitSyncState('USER');
     if (wasPlaying) player.play().catch(() => {});
   });
