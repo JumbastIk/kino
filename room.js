@@ -1,14 +1,8 @@
 // room.js
 
-// Проверка наличия roomId
-const params = new URLSearchParams(location.search);
-const roomId = params.get('roomId');
-if (!roomId) {
-  alert('Не указан ID комнаты.');
-  location.href = 'index.html';
-}
+// ! НЕ объявляем params, roomId, socket — они уже есть из common.js
 
-// Показать ID комнаты
+// Показать ID комнаты (использует переменные, объявленные в common.js)
 if (window.roomIdCode) roomIdCode.textContent = roomId;
 if (window.copyRoomId) copyRoomId.onclick = () => {
   navigator.clipboard.writeText(roomId);
