@@ -1,8 +1,6 @@
-// Не забудь: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script> в HTML
-
 const SUPABASE_URL = 'https://fztkezltyafcmnxtaywe.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dGtlemx0eWFmY21ueHRheXdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5ODYyMzYsImV4cCI6MjA2NzU2MjIzNn0.ygDhzO17UoUPPcfOqV9xqPZpHDFws8PMuz8JnlZMSv4';
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY); // <== исправил
 
 document.addEventListener('DOMContentLoaded', () => {
   const tabVac = document.getElementById('tab-vacancies');
@@ -32,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Получение и отображение вакансий
   async function fetchAndRenderVacancies() {
     vacancyList.innerHTML = '<div style="text-align:center;padding:40px 0;color:#999;">Загрузка...</div>';
-    const { data, error } = await supabase
+    const { data, error } = await client // <== исправил
       .from('vacancies')
       .select('*')
       .order('published_at', { ascending: false });
