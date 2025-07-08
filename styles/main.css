@@ -248,52 +248,60 @@ body {
 
 
 
-/* --- Форма создания вакансии: современный стиль --- */
-
+/* --- Глобальный стиль и фон --- */
 body {
-  background: #fafbfc;
+  background: linear-gradient(135deg, #f7faff 0%, #e7f0fa 100%);
+  min-height: 100vh;
   font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
   color: #23272f;
+  letter-spacing: 0.01em;
 }
 
+/* --- Форма --- */
 .form-box {
   max-width: 520px;
-  margin: 48px auto 32px auto;
+  margin: 54px auto 36px auto;
   background: #fff;
-  border-radius: 22px;
-  box-shadow: 0 4px 32px 0 rgba(32,42,67,0.08), 0 1.5px 8px rgba(50, 60, 80, 0.04);
-  padding: 36px 32px 28px 32px;
+  border-radius: 24px;
+  box-shadow:
+    0 8px 40px 0 rgba(38,54,100,0.10),
+    0 2px 8px rgba(60,70,110,0.05);
+  padding: 38px 36px 30px 36px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 28px;
   animation: fadeInUp .55s cubic-bezier(.39,.56,.32,1.14);
+  border: 1.5px solid #e3eaf4;
 }
 
 @keyframes fadeInUp {
-  0% { opacity: 0; transform: translateY(24px);}
+  0% { opacity: 0; transform: translateY(32px);}
   100% { opacity: 1; transform: translateY(0);}
 }
 
 .form-box h2 {
-  font-size: 2rem;
+  font-size: 2.1rem;
   font-weight: 800;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.025em;
   margin-bottom: 18px;
-  color: #1a1c21;
+  color: #162240;
+  text-align: center;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
+  position: relative;
 }
 
 .form-label {
-  font-size: 1.07rem;
+  font-size: 1.10rem;
   font-weight: 600;
   color: #3b4151;
-  letter-spacing: 0.01em;
   margin-bottom: 0;
+  letter-spacing: 0.01em;
+  padding-left: 2px;
   transition: color .22s;
 }
 
@@ -301,102 +309,149 @@ body {
 .form-textarea,
 .form-input[type="number"],
 .form-input[type="email"],
-.form-input[type="date"] {
-  padding: 13px 15px;
-  border-radius: 10px;
-  border: 1.2px solid #e2e6ea;
-  font-size: 1.05rem;
-  background: #f5f7fa;
+.form-input[type="date"],
+select.form-input {
+  padding: 14px 15px;
+  border-radius: 11px;
+  border: 1.3px solid #e2e6ea;
+  font-size: 1.08rem;
+  background: #f5f8fb;
   outline: none;
-  transition: border .2s, box-shadow .2s, background .3s;
+  transition: border .2s, box-shadow .18s, background .24s;
   font-weight: 500;
+  min-height: 45px;
+  appearance: none;
 }
 
 .form-input:focus,
-.form-textarea:focus {
+.form-textarea:focus,
+select.form-input:focus {
   border: 1.5px solid #006aff;
   background: #fff;
-  box-shadow: 0 0 0 2px #006aff22;
+  box-shadow: 0 0 0 2px #0070f333;
 }
 
 .form-input:disabled,
 .form-textarea:disabled {
   background: #f3f3f3;
   color: #aaa;
+  opacity: 0.65;
 }
 
+/* Плейсхолдер */
+.form-input::placeholder, .form-textarea::placeholder {
+  color: #b8bcc9;
+  opacity: 1;
+  font-weight: 400;
+}
+
+/* Текстовое поле */
 .form-textarea {
-  min-height: 90px;
-  max-height: 250px;
+  min-height: 92px;
+  max-height: 255px;
   resize: vertical;
 }
 
+/* Чекбокс аккуратный */
 input[type="checkbox"].form-input {
   width: 20px;
   height: 20px;
   margin-right: 9px;
   accent-color: #006aff;
+  border-radius: 6px;
 }
 
+/* Группа чекбокса */
 .checkbox-group {
   flex-direction: row;
   align-items: center;
-  gap: 10px;
-  margin-top: 6px;
-  margin-bottom: 6px;
+  gap: 11px;
+  margin: 9px 0 7px 0;
 }
 
 .input-hint {
-  font-size: 0.94rem;
-  color: #999;
+  font-size: 0.97rem;
+  color: #99a0ad;
   margin-top: 2px;
-  margin-left: 2px;
+  margin-left: 3px;
 }
 
 .form-btn {
-  margin-top: 20px;
-  padding: 15px 0;
+  margin-top: 21px;
+  padding: 17px 0;
   width: 100%;
-  background: linear-gradient(93deg, #006aff 60%, #2365e6 100%);
+  background: linear-gradient(96deg, #0d6efd 52%, #2151f5 100%);
   color: #fff;
-  font-size: 1.17rem;
-  font-weight: 700;
+  font-size: 1.19rem;
+  font-weight: 800;
   border: none;
   border-radius: 13px;
-  box-shadow: 0 1.5px 10px 0 rgba(22, 72, 186, 0.08);
+  box-shadow: 0 3px 14px 0 rgba(10, 60, 200, 0.07);
   cursor: pointer;
-  letter-spacing: 0.02em;
-  transition: background .19s, box-shadow .18s, transform .13s;
+  letter-spacing: 0.015em;
+  transition: background .18s, box-shadow .17s, transform .12s;
   will-change: background, box-shadow, transform;
 }
 
 .form-btn:hover,
 .form-btn:focus {
-  background: linear-gradient(95deg, #1a7bff 55%, #1657bb 100%);
-  box-shadow: 0 2.5px 20px 0 rgba(40, 100, 200, 0.13);
-  transform: translateY(-2px) scale(1.02);
+  background: linear-gradient(95deg, #176bff 40%, #003cce 100%);
+  box-shadow: 0 4px 26px 0 rgba(20, 90, 220, 0.14);
+  transform: translateY(-2px) scale(1.018);
 }
 
-/* Адаптивность */
-@media (max-width: 700px) {
-  .form-box {
-    max-width: 98vw;
-    padding: 18px 8vw 18px 8vw;
-    border-radius: 14px;
-  }
-  .form-btn {
-    font-size: 1.06rem;
-    padding: 12px 0;
-    border-radius: 8px;
-  }
+/* Select Arrow: аккуратная иконка */
+select.form-input {
+  background-image: url("data:image/svg+xml,%3Csvg width='14' height='9' viewBox='0 0 14 9' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L7 7.5L13 1.5' stroke='%236A6A80' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 18px 10px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
 
-/* Header — аккуратнее */
+/* Убрать стрелки у type="number" (и оранжевую рамку) */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+  box-shadow: none !important;
+  outline: none !important;
+  border: 1.3px solid #e2e6ea;
+}
+
+input[type=number]:focus {
+  border: 1.5px solid #006aff !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px #0070f333 !important;
+}
+
+/* Ошибки, сообщения */
+.form-message {
+  margin-top: 16px;
+  font-size: 1.08rem;
+  border-radius: 9px;
+  padding: 14px 16px;
+  color: #fff;
+  background: linear-gradient(95deg, #00b07c 45%, #13d489 100%);
+  display: none;
+}
+.form-message.error {
+  background: linear-gradient(96deg, #e4413e 40%, #d81159 100%);
+}
+
+/* --- Header — стиль --- */
 .header {
   background: #fff;
-  border-bottom: 1.5px solid #eef1f4;
-  padding: 16px 0;
-  margin-bottom: 7px;
+  border-bottom: 1.6px solid #e8eef3;
+  padding: 18px 0 13px 0;
+  margin-bottom: 10px;
+  box-shadow: 0 2px 18px rgba(36,51,99,0.03);
 }
 
 .search-row {
@@ -409,58 +464,46 @@ input[type="checkbox"].form-input {
 }
 
 .header-title {
-  font-size: 1.23rem;
-  font-weight: 800;
-  color: #15192c;
-  letter-spacing: 0.012em;
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: #1a1e2c;
   margin-left: 5px;
+  letter-spacing: 0.012em;
 }
 
 .back-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px; height: 34px;
-  font-size: 1.45rem;
+  width: 36px; height: 36px;
+  font-size: 1.41rem;
   border-radius: 8px;
-  color: #232b41;
-  background: #f1f5fa;
+  color: #2b3953;
+  background: #f0f4fa;
   text-decoration: none;
-  margin-right: 10px;
-  transition: background .18s, color .17s;
+  margin-right: 11px;
+  border: none;
+  transition: background .16s, color .17s;
 }
 .back-btn:hover {
   background: #e4eaff;
   color: #006aff;
 }
 
-/* Убрать стрелки у type="number" (по желанию) */
-.form-input, .form-textarea {
-  border: 1.5px solid #d1d5db;
-  border-radius: 8px;
-  background: #fafbfc;
-  transition: border-color .17s;
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-.form-input:focus, .form-textarea:focus {
-  border-color: #424242;
-  outline: none;
-  box-shadow: none !important;
-}
-
-/* Success/Error сообщение (если понадобится) */
-.form-message {
-  margin-top: 16px;
-  font-size: 1rem;
-  border-radius: 8px;
-  padding: 13px 15px;
-  color: #fff;
-  background: linear-gradient(95deg, #00b07c 45%, #1ad489 100%);
-  display: none;
-}
-.form-message.error {
-  background: linear-gradient(95deg, #d62020 45%, #b61818 100%);
+/* --- Адаптивность --- */
+@media (max-width: 700px) {
+  .form-box {
+    max-width: 99vw;
+    padding: 15px 4vw 15px 4vw;
+    border-radius: 12px;
+  }
+  .form-btn {
+    font-size: 1.09rem;
+    padding: 12px 0;
+    border-radius: 8px;
+  }
+  .header-title, .search-row {
+    font-size: 1.08rem;
+  }
 }
 
