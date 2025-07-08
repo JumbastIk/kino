@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpaceJobs — Мини приложение</title>
+  <link rel="stylesheet" href="styles/main.css?v=2">
+</head>
+<body>
+  <!-- ВЕРХ -->
+  <header class="header">
+    <div class="search-row">
+      <input class="search-input" type="text" placeholder="Должность, ключевые слова...">
+      <button class="filter-btn">
+        <span>⚙️</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ЦЕНТР — вкладки -->
+  <main id="main-content">
+    <div class="tabs-row">
+      <button id="tab-vacancies" class="tab-btn active">ВАКАНСИИ</button>
+      <button id="tab-resumes" class="tab-btn">РЕЗЮМЕ</button>
+    </div>
+
+    <!-- Кнопка добавления вакансии -->
+    <div id="add-row" class="add-row">
+      <button id="add-vacancy-btn" class="add-btn">+ Добавить вакансию</button>
+    </div>
+
+    <div id="vacancy-list" class="list visible"></div>
+    <div id="resume-list" class="list"></div>
+  </main>
+
+  <!-- НИЖНЕЕ МЕНЮ -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active"><span>🔍</span><div>Поиск</div></button>
+    <button class="nav-btn"><span>♡</span><div>Избранное</div></button>
+    <button class="nav-btn"><span>✉️</span><div>Отклики</div><span class="badge">5</span></button>
+    <button class="nav-btn"><span>💬</span><div>Сообщения</div><span class="badge">83</span></button>
+    <button class="nav-btn"><span>😎</span><div>Профиль</div><span class="badge">1</span></button>
+  </nav>
+
+  <script src="js/data.js?v=1"></script>
+  <script src="js/app.js?v=2"></script>
+  <script>
+    // Переход на страницу добавления вакансии
+    document.addEventListener("DOMContentLoaded", function () {
+      document.getElementById('add-vacancy-btn').onclick = function () {
+        window.location.href = "add-vacancy.html";
+      }
+    });
+  </script>
+</body>
+</html>
