@@ -243,3 +243,224 @@ body {
   background: #232629;
   box-shadow: 0 4px 24px rgba(40,44,65,0.16);
 }
+
+
+
+
+
+/* --- Форма создания вакансии: современный стиль --- */
+
+body {
+  background: #fafbfc;
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  color: #23272f;
+}
+
+.form-box {
+  max-width: 520px;
+  margin: 48px auto 32px auto;
+  background: #fff;
+  border-radius: 22px;
+  box-shadow: 0 4px 32px 0 rgba(32,42,67,0.08), 0 1.5px 8px rgba(50, 60, 80, 0.04);
+  padding: 36px 32px 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  animation: fadeInUp .55s cubic-bezier(.39,.56,.32,1.14);
+}
+
+@keyframes fadeInUp {
+  0% { opacity: 0; transform: translateY(24px);}
+  100% { opacity: 1; transform: translateY(0);}
+}
+
+.form-box h2 {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-bottom: 18px;
+  color: #1a1c21;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-label {
+  font-size: 1.07rem;
+  font-weight: 600;
+  color: #3b4151;
+  letter-spacing: 0.01em;
+  margin-bottom: 0;
+  transition: color .22s;
+}
+
+.form-input,
+.form-textarea,
+.form-input[type="number"],
+.form-input[type="email"],
+.form-input[type="date"] {
+  padding: 13px 15px;
+  border-radius: 10px;
+  border: 1.2px solid #e2e6ea;
+  font-size: 1.05rem;
+  background: #f5f7fa;
+  outline: none;
+  transition: border .2s, box-shadow .2s, background .3s;
+  font-weight: 500;
+}
+
+.form-input:focus,
+.form-textarea:focus {
+  border: 1.5px solid #006aff;
+  background: #fff;
+  box-shadow: 0 0 0 2px #006aff22;
+}
+
+.form-input:disabled,
+.form-textarea:disabled {
+  background: #f3f3f3;
+  color: #aaa;
+}
+
+.form-textarea {
+  min-height: 90px;
+  max-height: 250px;
+  resize: vertical;
+}
+
+input[type="checkbox"].form-input {
+  width: 20px;
+  height: 20px;
+  margin-right: 9px;
+  accent-color: #006aff;
+}
+
+.checkbox-group {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.input-hint {
+  font-size: 0.94rem;
+  color: #999;
+  margin-top: 2px;
+  margin-left: 2px;
+}
+
+.form-btn {
+  margin-top: 20px;
+  padding: 15px 0;
+  width: 100%;
+  background: linear-gradient(93deg, #006aff 60%, #2365e6 100%);
+  color: #fff;
+  font-size: 1.17rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 13px;
+  box-shadow: 0 1.5px 10px 0 rgba(22, 72, 186, 0.08);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: background .19s, box-shadow .18s, transform .13s;
+  will-change: background, box-shadow, transform;
+}
+
+.form-btn:hover,
+.form-btn:focus {
+  background: linear-gradient(95deg, #1a7bff 55%, #1657bb 100%);
+  box-shadow: 0 2.5px 20px 0 rgba(40, 100, 200, 0.13);
+  transform: translateY(-2px) scale(1.02);
+}
+
+/* Адаптивность */
+@media (max-width: 700px) {
+  .form-box {
+    max-width: 98vw;
+    padding: 18px 8vw 18px 8vw;
+    border-radius: 14px;
+  }
+  .form-btn {
+    font-size: 1.06rem;
+    padding: 12px 0;
+    border-radius: 8px;
+  }
+}
+
+/* Header — аккуратнее */
+.header {
+  background: #fff;
+  border-bottom: 1.5px solid #eef1f4;
+  padding: 16px 0;
+  margin-bottom: 7px;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 520px;
+  margin: 0 auto;
+  font-size: 1.13rem;
+}
+
+.header-title {
+  font-size: 1.23rem;
+  font-weight: 800;
+  color: #15192c;
+  letter-spacing: 0.012em;
+  margin-left: 5px;
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px; height: 34px;
+  font-size: 1.45rem;
+  border-radius: 8px;
+  color: #232b41;
+  background: #f1f5fa;
+  text-decoration: none;
+  margin-right: 10px;
+  transition: background .18s, color .17s;
+}
+.back-btn:hover {
+  background: #e4eaff;
+  color: #006aff;
+}
+
+/* Убрать стрелки у type="number" (по желанию) */
+.form-input, .form-textarea {
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  background: #fafbfc;
+  transition: border-color .17s;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.form-input:focus, .form-textarea:focus {
+  border-color: #424242;
+  outline: none;
+  box-shadow: none !important;
+}
+
+/* Success/Error сообщение (если понадобится) */
+.form-message {
+  margin-top: 16px;
+  font-size: 1rem;
+  border-radius: 8px;
+  padding: 13px 15px;
+  color: #fff;
+  background: linear-gradient(95deg, #00b07c 45%, #1ad489 100%);
+  display: none;
+}
+.form-message.error {
+  background: linear-gradient(95deg, #d62020 45%, #b61818 100%);
+}
+
