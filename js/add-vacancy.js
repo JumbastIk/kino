@@ -1,6 +1,6 @@
 const SUPABASE_URL = 'https://fztkezltyafcmnxtaywe.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dGtlemx0eWFmY21ueHRheXdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5ODYyMzYsImV4cCI6MjA2NzU2MjIzNn0.ygDhzO17UoUPPcfOqV9xqPZpHDFws8PMuz8JnlZMSv4';
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY); // вот так!
 
 document.addEventListener('DOMContentLoaded', function () {
   const form = document.getElementById('add-vacancy-form');
@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Отправка в Supabase
-    const { data, error } = await supabase
+    const { data, error } = await client  // <=== client, не supabase!
       .from('vacancies')
       .insert([formData]);
 
