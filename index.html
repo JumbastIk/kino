@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SpaceJobs — Мини приложение</title>
   <link rel="stylesheet" href="styles/main.css?v=2">
+  <!-- Подключение supabase-js (можно подключать только на страницах, где он реально нужен, но не помешает) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 </head>
 <body>
   <!-- ВЕРХ -->
@@ -42,15 +44,7 @@
     <button class="nav-btn"><span>😎</span><div>Профиль</div><span class="badge">1</span></button>
   </nav>
 
-  <script src="js/data.js?v=1"></script>
+  <!-- Подключение основного JS -->
   <script src="js/app.js?v=2"></script>
-  <script>
-    // Переход на страницу добавления вакансии
-    document.addEventListener("DOMContentLoaded", function () {
-      document.getElementById('add-vacancy-btn').onclick = function () {
-        window.location.href = "add-vacancy.html";
-      }
-    });
-  </script>
 </body>
 </html>

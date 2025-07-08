@@ -5,19 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Добавить вакансию — SpaceJobs</title>
   <link rel="stylesheet" href="styles/main.css?v=2">
+  <!-- Подключение supabase-js для работы с базой -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 </head>
 <body>
   <header class="header">
     <div class="search-row">
-      <a href="index.html" class="back-btn" style="font-size:1.45rem;text-decoration:none;color:#171717;margin-right:8px;">←</a>
-      <span style="font-size:1.18rem;font-weight:700;letter-spacing:0.02em;">Добавить вакансию</span>
+      <a href="index.html" class="back-btn">←</a>
+      <span class="header-title">Добавить вакансию</span>
     </div>
   </header>
 
   <main>
     <form id="add-vacancy-form" class="form-box" autocomplete="off">
       <h2>Создать вакансию</h2>
-
       <div class="form-group">
         <label class="form-label" for="title">Должность *</label>
         <input class="form-input" name="title" id="title" required>
@@ -67,7 +68,7 @@
       <div class="form-group">
         <label class="form-label" for="skills">Ключевые навыки</label>
         <input class="form-input" name="skills" id="skills" placeholder="Python, SQL, Docker">
-        <div style="font-size:.93rem;color:#999;margin-top:2px;">Указывайте через запятую</div>
+        <div class="input-hint">Указывайте через запятую</div>
       </div>
       <div class="form-group">
         <label class="form-label" for="contact_name">Контактное лицо</label>
@@ -81,25 +82,19 @@
         <label class="form-label" for="contact_phone">Телефон</label>
         <input class="form-input" name="contact_phone" id="contact_phone">
       </div>
-      <div class="form-group" style="display:flex;align-items:center;gap:10px;">
-        <input class="form-input" type="checkbox" name="is_remote" id="is_remote" style="width:19px;height:19px;">
-        <label for="is_remote" class="form-label" style="margin:0;cursor:pointer;">Удалённая работа</label>
+      <div class="form-group checkbox-group">
+        <input class="form-input" type="checkbox" name="is_remote" id="is_remote">
+        <label for="is_remote" class="form-label">Удалённая работа</label>
       </div>
       <div class="form-group">
         <label class="form-label" for="expires_at">Дата окончания публикации</label>
         <input class="form-input" type="date" name="expires_at" id="expires_at">
       </div>
-
       <button class="form-btn" type="submit">Опубликовать вакансию</button>
     </form>
   </main>
 
-  <script>
-    // Если надо: после успешного добавления вакансии, сделать window.location = 'index.html';
-    document.querySelector('.back-btn').onclick = e => {
-      e.preventDefault();
-      window.location.href = 'index.html';
-    };
-  </script>
+  <!-- Основной JS -->
+  <script src="js/add-vacancy.js?v=2"></script>
 </body>
 </html>

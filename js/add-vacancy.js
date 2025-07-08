@@ -1,33 +1,56 @@
-const SUPABASE_URL = 'https://XXX.supabase.co';           // тот же url и key
-const SUPABASE_KEY = 'your-anon-key';
+const SUPABASE_URL = 'https://fztkezltyafcmnxtaywe.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dGtlemx0eWFmY21ueHRheXdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5ODYyMzYsImV4cCI6MjA2NzU2MjIzNn0.ygDhzO17UoUPPcfOqV9xqPZpHDFws8PMuz8JnlZMSv4';
 const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-document.getElementById('add-vacancy-form').addEventListener('submit', async function(e){
-  e.preventDefault();
-  const formData = Object.fromEntries(new FormData(this).entries());
+document.addEventListener('DOMContentLoaded', function () {
+  const form = document.getElementById('add-vacancy-form');
+  if (!form) return;
 
-  // skills — массив!
-  formData.skills = formData.skills ? formData.skills.split(',').map(s => s.trim()) : [];
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
 
-  // is_remote — boolean
-  formData.is_remote = !!formData.is_remote;
+    // Получение данных из формы
+    const formData = Object.fromEntries(new FormData(this).entries());
 
-  // convert salary_min, salary_max к числу
-  formData.salary_min = formData.salary_min ? Number(formData.salary_min) : null;
-  formData.salary_max = formData.salary_max ? Number(formData.salary_max) : null;
+    // skills — массив!
+    formData.skills = formData.skills
+      ? formData.skills.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
 
-  // даты
-  if (formData.expires_at && formData.expires_at.length < 12) {
-    formData.expires_at = formData.expires_at + 'T00:00:00.000Z';
+    // is_remote — boolean
+    formData.is_remote = !!formData.is_remote;
+
+    // salary_min/max — числа
+    formData.salary_min = formData.salary_min ? Number(formData.salary_min) : null;
+    formData.salary_max = formData.salary_max ? Number(formData.salary_max) : null;
+
+    // published_at — сейчас
+    formData.published_at = new Date().toISOString();
+
+    // expires_at — если выбрано
+    if (formData.expires_at && formData.expires_at.length === 10) {
+      formData.expires_at = formData.expires_at + 'T00:00:00.000Z';
+    }
+
+    // Отправка в Supabase
+    const { data, error } = await supabase
+      .from('vacancies')
+      .insert([formData]);
+
+    if (error) {
+      alert('Ошибка: ' + error.message);
+      return;
+    }
+    alert('Вакансия успешно добавлена!');
+    window.location.href = 'index.html';
+  });
+
+  // Кнопка "Назад" — если есть
+  const backBtn = document.querySelector('.back-btn');
+  if (backBtn) {
+    backBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      window.location.href = 'index.html';
+    });
   }
-
-  const { data, error } = await supabase
-    .from('vacancies')
-    .insert([formData]);
-  if (error) {
-    alert('Ошибка: ' + error.message);
-    return;
-  }
-  alert('Вакансия успешно добавлена!');
-  window.location.href = 'index.html';
 });

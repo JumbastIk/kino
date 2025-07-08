@@ -1,5 +1,4 @@
-// Подключи supabase-js в index.html:
-// <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+// Не забудь: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script> в HTML
 
 const SUPABASE_URL = 'https://fztkezltyafcmnxtaywe.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dGtlemx0eWFmY21ueHRheXdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5ODYyMzYsImV4cCI6MjA2NzU2MjIzNn0.ygDhzO17UoUPPcfOqV9xqPZpHDFws8PMuz8JnlZMSv4';
@@ -10,7 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabRes = document.getElementById('tab-resumes');
   const vacancyList = document.getElementById('vacancy-list');
   const resumeList = document.getElementById('resume-list');
-  const addRow = document.querySelector('.add-row'); // если есть
+  const addBtn = document.getElementById('add-vacancy-btn');
 
   // Карточка вакансии
   function vacancyCard(vac) {
@@ -30,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
   }
 
-  // Функция для загрузки вакансий из Supabase
+  // Получение и отображение вакансий
   async function fetchAndRenderVacancies() {
     vacancyList.innerHTML = '<div style="text-align:center;padding:40px 0;color:#999;">Загрузка...</div>';
     const { data, error } = await supabase
@@ -38,17 +37,17 @@ document.addEventListener('DOMContentLoaded', () => {
       .select('*')
       .order('published_at', { ascending: false });
     if (error) {
-      vacancyList.innerHTML = '<div style="color:#d33;padding:24px 0;text-align:center">Ошибка загрузки: ' + error.message + '</div>';
+      vacancyList.innerHTML = `<div style="color:#d33;padding:24px 0;text-align:center">Ошибка загрузки: ${error.message}</div>`;
       return;
     }
-    if (!data.length) {
+    if (!data || !data.length) {
       vacancyList.innerHTML = '<div style="color:#999;padding:24px 0;text-align:center">Пока нет вакансий</div>';
       return;
     }
     vacancyList.innerHTML = data.map(vacancyCard).join('');
   }
 
-  // Для вкладок (резюме не делаем, только заглушка)
+  // Отображение нужной вкладки
   function showTab(tab) {
     if (tab === 'vacancies') {
       tabVac.classList.add('active');
@@ -65,15 +64,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  tabVac.addEventListener('click', () => showTab('vacancies'));
-  tabRes.addEventListener('click', () => showTab('resumes'));
+  // Слушатели вкладок
+  if (tabVac) tabVac.addEventListener('click', () => showTab('vacancies'));
+  if (tabRes) tabRes.addEventListener('click', () => showTab('resumes'));
 
-  // Если у тебя есть кнопка "Добавить вакансию"
-  const addBtn = document.getElementById('add-vacancy-btn');
+  // Кнопка "Добавить вакансию"
   if (addBtn) {
-    addBtn.onclick = () => window.location.href = 'add-vacancy.html';
+    addBtn.onclick = function () {
+      window.location.href = 'add-vacancy.html';
+    };
   }
 
-  // Стартовый рендер (вакансии)
+  // Первый рендер
   showTab('vacancies');
 });
