@@ -4,8 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Добавить вакансию — SpaceJobs</title>
-  <link rel="stylesheet" href="styles/main.css?v=21212211221212">
-  <!-- Supabase JS -->
+  <link rel="stylesheet" href="styles/main.css?v=2121221211221212">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 </head>
 <body>
@@ -15,86 +14,97 @@
       <span class="header-title">Добавить вакансию</span>
     </div>
   </header>
-
   <main>
-    <form id="add-vacancy-form" class="form-box" autocomplete="off">
-      <h2>Создать вакансию</h2>
-      <div class="form-group">
-        <label class="form-label" for="title">Должность *</label>
-        <input class="form-input" name="title" id="title" required>
+    <div class="form-wizard">
+      <div class="progress-container">
+        <div class="progress-bar" style="width: 33%;"></div>
       </div>
-      <div class="form-group">
-        <label class="form-label" for="company">Компания</label>
-        <input class="form-input" name="company" id="company">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="salary_min">Зарплата, от</label>
-        <input class="form-input" type="number" name="salary_min" id="salary_min" min="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="salary_max">Зарплата, до</label>
-        <input class="form-input" type="number" name="salary_max" id="salary_max" min="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="salary_text">Комментарий к зарплате</label>
-        <input class="form-input" name="salary_text" id="salary_text" placeholder="По договорённости / Нет верхней границы">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="employment">Тип занятости</label>
-        <select class="form-input" name="employment" id="employment">
-          <option value="">-- не указано --</option>
-          <option>Полная занятость</option>
-          <option>Частичная занятость</option>
-          <option>Проектная работа</option>
-          <option>Стажировка</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="city">Город</label>
-        <input class="form-input" name="city" id="city">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="address">Адрес</label>
-        <input class="form-input" name="address" id="address">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="experience">Требуемый опыт</label>
-        <input class="form-input" name="experience" id="experience" placeholder="Например, 1-3 года">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="description">Описание вакансии</label>
-        <textarea class="form-textarea" name="description" id="description" rows="4"></textarea>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="skills">Ключевые навыки</label>
-        <input class="form-input" name="skills" id="skills" placeholder="Python, SQL, Docker">
-        <div class="input-hint">Указывайте через запятую</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="contact_name">Контактное лицо</label>
-        <input class="form-input" name="contact_name" id="contact_name">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="contact_email">Email</label>
-        <input class="form-input" type="email" name="contact_email" id="contact_email">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="contact_phone">Телефон</label>
-        <input class="form-input" name="contact_phone" id="contact_phone">
-      </div>
-      <div class="form-group checkbox-group">
-        <input class="form-input" type="checkbox" name="is_remote" id="is_remote">
-        <label for="is_remote" class="form-label">Удалённая работа</label>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="expires_at">Дата окончания публикации</label>
-        <input class="form-input" type="date" name="expires_at" id="expires_at">
-      </div>
-      <button class="form-btn" type="submit">Опубликовать вакансию</button>
-    </form>
+      <!-- Шаг 1 -->
+      <form id="step-1" class="wizard-step active" autocomplete="off">
+        <h2 class="form-title">Основное</h2>
+        <div class="form-group">
+          <label class="form-label" for="title">Должность *</label>
+          <input class="form-input" name="title" id="title" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="company">Компания</label>
+          <input class="form-input" name="company" id="company">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="city">Город</label>
+          <input class="form-input" name="city" id="city">
+        </div>
+        <button type="button" class="form-btn next-btn">Дальше</button>
+      </form>
+      <!-- Шаг 2 -->
+      <form id="step-2" class="wizard-step">
+        <h2 class="form-title">Условия</h2>
+        <div class="form-group">
+          <label class="form-label" for="salary_min">Зарплата, от</label>
+          <input class="form-input" type="number" name="salary_min" id="salary_min" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="salary_max">Зарплата, до</label>
+          <input class="form-input" type="number" name="salary_max" id="salary_max" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="salary_text">Комментарий к зарплате</label>
+          <input class="form-input" name="salary_text" id="salary_text" placeholder="По договорённости / Нет верхней границы">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="employment">Тип занятости</label>
+          <select class="form-input" name="employment" id="employment">
+            <option value="">-- не указано --</option>
+            <option>Полная занятость</option>
+            <option>Частичная занятость</option>
+            <option>Проектная работа</option>
+            <option>Стажировка</option>
+          </select>
+        </div>
+        <button type="button" class="form-btn prev-btn">Назад</button>
+        <button type="button" class="form-btn next-btn">Дальше</button>
+      </form>
+      <!-- Шаг 3 -->
+      <form id="step-3" class="wizard-step">
+        <h2 class="form-title">Дополнительно</h2>
+        <div class="form-group">
+          <label class="form-label" for="experience">Требуемый опыт</label>
+          <input class="form-input" name="experience" id="experience" placeholder="Например, 1-3 года">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="description">Описание вакансии</label>
+          <textarea class="form-textarea" name="description" id="description" rows="4"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="skills">Ключевые навыки</label>
+          <input class="form-input" name="skills" id="skills" placeholder="Python, SQL, Docker">
+          <div class="input-hint">Указывайте через запятую</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="contact_name">Контактное лицо</label>
+          <input class="form-input" name="contact_name" id="contact_name">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="contact_email">Email</label>
+          <input class="form-input" type="email" name="contact_email" id="contact_email">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="contact_phone">Телефон</label>
+          <input class="form-input" name="contact_phone" id="contact_phone">
+        </div>
+        <div class="form-group checkbox-group">
+          <input class="form-input" type="checkbox" name="is_remote" id="is_remote">
+          <label for="is_remote" class="form-label">Удалённая работа</label>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="expires_at">Дата окончания публикации</label>
+          <input class="form-input" type="date" name="expires_at" id="expires_at">
+        </div>
+        <button type="button" class="form-btn prev-btn">Назад</button>
+        <button type="submit" class="form-btn">Опубликовать вакансию</button>
+      </form>
+    </div>
   </main>
-
-  <!-- JS для отправки формы и перехода назад (всё в add-vacancy.js) -->
-  <script src="js/add-vacancy.js?v=22221212112211"></script>
+  <script src="js/add-vacancy.js?v=2222121211221211"></script>
 </body>
 </html>
